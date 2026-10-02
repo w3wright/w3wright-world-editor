@@ -1,0 +1,44 @@
+{
+  "name": "w3wright-world-editor",
+  "type": "module",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@12.4.2",
+  "description": "Just Another World Editor — a desktop editor for Warcraft III maps, built on the w3wright core",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "prepare": "simple-git-hooks"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-opener": "^2",
+    "nano-pastel": "^1.2.0",
+    "vue": "^3.5.13",
+    "vue-router": "^5.3.1"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^9.5.1",
+    "@tauri-apps/cli": "^2",
+    "@unocss/eslint-plugin": "^66.10.5",
+    "@unocss/reset": "^66.10.5",
+    "@vitejs/plugin-vue": "^6.0.7",
+    "eslint": "^10.11.0",
+    "nano-staged": "^1.0.2",
+    "simple-git-hooks": "^2.14.0",
+    "typescript": "~6.0.3",
+    "unocss": "^66.10.5",
+    "vite": "^8.0.16",
+    "vue-tsc": "^3.3.5"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "pnpm exec nano-staged"
+  },
+  "nano-staged": {
+    "*.{js,jsx,cjs,mjs,ts,tsx,cts,mts,vue,json,jsonc}": "eslint --fix"
+  }
+}

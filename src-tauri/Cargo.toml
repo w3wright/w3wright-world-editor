@@ -1,0 +1,71 @@
+[package]
+name = "w3wright-world-editor"
+version = "0.1.0"
+description = "Desktop studio for the W3wright Warcraft III map development platform"
+edition = "2021"
+publish = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "w3wright_world_editor_lib"
+crate-type = [
+  "staticlib",
+  "cdylib",
+  "rlib"
+]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = [ "derive" ] }
+serde_json = "1"
+
+# --- w3wright core, consumed by version ---------------------------------------
+#
+# Declared the way any external consumer would declare it, with the version that
+# is published on crates.io. During development a `[patch]` in
+# `.cargo/config.toml` redirects it at the local `w3wright` checkout, so this file
+# stays valid for both a local build and a release.
+#
+# ⚠️ The requirement has to be satisfied by **both** the published version and the
+# local one, and the local one is what `[patch]` supplies. So when the local
+# checkout moves to a version that is not published yet, the build fails here with
+# a mismatch — that is deliberate, and the fix is to publish (see README), not to
+# widen the requirement until it stops complaining.
+#
+# ⚠️ Only what is actually used is listed. Seven crates went in when this app was
+# scaffolded and it used none of them; a dependency that no code calls is a
+# compile-time cost and a claim about the design that is not true yet. The others
+# arrive with the feature that needs them — `war3-project` for extract/build,
+# `war3-object` for the object editor.
+#
+# ⚠️ `war3-map` is published as `0.0.2` while the local checkout is `0.0.3`, so a
+# **release build cannot resolve it yet**: Cargo treats `0.0.x` as exact, and
+# `"0.0.3"` is not satisfied by `0.0.2`. Publishing `0.0.3` is the fix; see the
+# README's release checklist.
+# ⚠️ Two crates, not one, and the reason is a real trap: `Map::files` is **not** the
+# archive's member list. It is the intersection of the archive with a hardcoded
+# `KNOWN_MEMBER_NAMES` probe list, so a member outside that list — a minimap
+# `war3mapMap.blp`, any imported asset — is absent from it without any diagnostic.
+# Building a member list from `Map::files` silently shows fewer files than the map
+# has. `war3-archive` is what enumerates the real members.
+war3-archive = "0.0.3"
+war3-map = "0.0.3"
+# `war3-core` is needed for `Diagnostics` — the type the core's classifier fills in,
+# and the type this crate must name to call it.
+war3-core = "0.0.3"
+# `war3-project` decides a member's **disposition** ("textified", "kept as binary",
+# "kept as its stored block"). The Explorer shows that per member, and the answer must
+# come from here rather than be re-derived in the interface: `extract` acts on the very
+# same function, so a screen claiming "textified" while extraction wrote binary is
+# impossible by construction.
+war3-project = "0.0.3"
+# The terrain view reads `.w3e` directly; it is no longer only a transitive dependency.
+war3-terrain = "0.0.3"

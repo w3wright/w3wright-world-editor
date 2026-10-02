@@ -1,0 +1,110 @@
+/*
+ * The application's base layer: what a reset cannot know and a utility cannot reach.
+ *
+ * Three things live here, and nothing else should:
+ *
+ * 1. **The reset.** UnoCSS's utilities assume a normalised baseline — `border-box`
+ *    sizing, no default margins, consistent form-control inheritance. Without it
+ *    `virtual:uno.css` emits utilities with no reset at all, which is why a `<button>`
+ *    keeps the browser's own font and a heading keeps its margin. The plan comment that
+ *    used to sit in `main.ts` claimed `virtual:uno.css` included this; it does not, and
+ *    that is worth knowing before removing this import.
+ *
+ * 2. **Light and dark colours.** Set on `:root` so the whole window follows the system
+ *    scheme, and so a component never has to hard-code a background.
+ *
+ * 3. **The font stack.** A desktop app should not fall back to Times New Roman. This is
+ *    the one thing no utility can express, because it belongs to the document rather
+ *    than to an element.
+ *
+ * ## The root font size is 16px and stays there
+ *
+ * It is pinned rather than left to the browser so the `rem` utilities mean a fixed
+ * number of pixels: `text-0.85rem` is 13.6px, `text-0.9rem` is 14.4px. Those values were
+ * chosen against a 16px root, so the interface is already the density it was designed at.
+ *
+ * **To change a size, change that utility** — `text-sm`, `text-4`, `text-0.8rem` — and not
+ * this line. Moving the root rescales every `rem` in the app at once, which turns a
+ * one-element adjustment into a redesign of every spacing and type value, and it does it
+ * silently. A single `px` value in one place is a change you can see in a diff.
+ */
+@import '@unocss/reset/tailwind.css';
+
+:root {
+  font-family:
+    Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+
+  color: #0f0f0f;
+  background-color: #f6f6f6;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+/*
+ * The dark scheme. Only the two colours differ; everything else is inherited, which is
+ * what keeps the panels free of `dark:` variants for a window that follows the system.
+ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #f6f6f6;
+    background-color: #2f2f2f;
+  }
+}
+
+/*
+ * Member badges.
+ *
+ * `--badge-h` and `--badge-s` come from `nano-pastel` as an inline style; the lightness
+ * and alpha are here, because they are the half that has to change with the colour
+ * scheme and a media query cannot be written inline.
+ *
+ * ⚠️ **The lightness is not a style preference.** Measured against WCAG AA (4.5:1), a
+ * single value cannot serve both schemes. On the light surface the pastel's own default
+ * (92%) as text gives ratios between 1.1 and 2.4 — invisible. At 30% every hue passes on
+ * white, but the same 30% on this dark surface gives 1.0 to 2.6. So the text is dark on
+ * light and light on dark, and each side was checked rather than eyeballed.
+ *
+ * The fill is the pastel itself, which is what it is good at: a tint that separates the
+ * badge from the row without competing with the text.
+ */
+.badge {
+  --badge-text-l: 30%;
+  --badge-fill-l: 96%;
+  --badge-fill-a: 0.55;
+
+  flex: none;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  text-align: center;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+
+  color: hsl(var(--badge-h) var(--badge-s) var(--badge-text-l));
+  background: hsl(var(--badge-h) var(--badge-s) var(--badge-fill-l) / var(--badge-fill-a));
+  border: 1px solid hsl(var(--badge-h) var(--badge-s) var(--badge-text-l) / 0.35);
+}
+
+/*
+ * The member list. A fixed width is what makes the names line up in a column, which is the
+ * only reason to fix it — and it is the wrong choice for the header tally, whose labels are
+ * longer ("binary 12") and which sized itself onto two lines when it shared this rule.
+ */
+.badge-fixed {
+  width: 4.2rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .badge {
+    --badge-text-l: 72%;
+    --badge-fill-l: 22%;
+    --badge-fill-a: 0.6;
+  }
+}

@@ -1,0 +1,11 @@
+minimumReleaseAgeExcludePrune: true
+trustPolicy: no-downgrade
+shellEmulator: true
+# pnpm reads build-script permissions from here since v10: a dependency's install
+# script does not run unless it is allowed by name. That is a supply-chain default
+# worth keeping — most packages do not need one.
+allowBuilds:
+  # Installs the git hooks declared in `package.json`'s `simple-git-hooks` block.
+  # Without this the hooks silently never appear, which is the failure mode that
+  # looks like "the linter just doesn't run on commit".
+  simple-git-hooks: true

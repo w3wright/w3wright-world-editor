@@ -1,0 +1,46 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Rust
+#
+# The workspace's build output lands here rather than under `src-tauri`, because the
+# `Cargo.toml` at this level declares the workspace — so `target/` is one directory,
+# shared by the app and every dependency. `src-tauri/.gitignore` covers the case where
+# Cargo is run from inside `src-tauri` instead.
+/target
+
+# pnpm's local store, when one is configured inside the project
+.pnpm-store
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Tooling caches
+.eslintcache
+.vite
+
+# Generated route types
+#
+# `vue-router/vite` writes the route table and its types here on every dev-server
+# start. It is output, not source — hand-editing it is a mistake, and committing it
+# creates conflicts for no benefit.
+.auto-generate

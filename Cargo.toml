@@ -1,0 +1,32 @@
+# A workspace of one, on purpose.
+#
+# `w3wright-world-editor` is its own project in its own repository. It is not a member
+# of the `w3wright` workspace one directory up, and it must not become one: it
+# consumes those crates exactly the way a stranger would — by version — so that
+# "works locally" and "works from crates.io" stay the same question.
+#
+# ⚠️ A workspace of one is not ceremony. Without a `[workspace]` table Cargo
+# walks **up** the directory tree looking for a workspace root, finds the
+# `w3wright` checkout when it happens to sit one level up, and then refuses to
+# build with "current package believes it's in a workspace when it's not". This
+# table ends that search here. **Do not delete it** — and note that the release
+# build may run from a checkout where no such neighbour exists at all, so the
+# build must never depend on one.
+#
+# The app's release profile lives here rather than in `src-tauri/Cargo.toml`
+# because that is where Cargo reads it: a member's `[profile.*]` is ignored.
+# The values are the Tauri template's size tuning.
+[workspace]
+resolver = "2"
+members = [ "src-tauri" ]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+# The Tauri template sets `panic = "abort"`. Left at the default `unwind` on
+# purpose: abort shrinks the binary but makes a panic unrecoverable *and*
+# silently disables `#[should_panic]`, so any test asserting on a panic would
+# stop testing what it claims to. Revisit when binary size is actually a
+# problem.
+strip = true

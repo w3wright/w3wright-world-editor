@@ -1,0 +1,38 @@
+# Development-only: point the `war3-*` dependencies at the local checkout.
+#
+# This file is why the manifest can declare a plain published version and still
+# build against uncommitted local work. It is `.cargo/config.toml`, not a
+# `[patch]` table in `Cargo.toml`, for one reason: **config is never packaged**,
+# so a published artefact cannot carry a filesystem path into someone else's
+# build. A `[patch]` in the manifest is likewise ignored by consumers, but it
+# would still be visible in the published manifest and read as a mistake.
+#
+# ⚠️ The transitive ones must be listed even though no code here names them.
+# `war3-map` depends on `war3-archive`, `war3-terrain` and `war3-core`, and it
+# depends on them **by version** — so without these entries Cargo would satisfy
+# those from crates.io as well and compile two copies of `war3-core`. The symptom
+# is a type error on a value that looks identical (`expected war3_core::FourCC,
+# found war3_core::FourCC`), so this paragraph is worth reading before deleting an
+# entry that looks unused.
+#
+# ⚠️ The set below is exactly what the app reaches through its one direct
+# dependency. When `war3-project` or `war3-object` is added to the manifest, add it
+# here in the same change — a crate that is declared but unpatched resolves from
+# the registry, which is a different copy of the code than the one being edited.
+#
+# ⚠️ The path is relative to *this* file, so it only resolves on a machine with
+# the `w3wright` checkout as a sibling directory. That is the correct trade: a
+# release build must not need the patch at all. To prove a release build works,
+# build with the patch disabled — an empty `CARGO_HOME` is not enough, since the
+# patch comes from here. Temporarily rename this file, build, then rename it
+# back.
+#
+# ⚠️ The path also has to be kept in step with the versions in
+# `src-tauri/Cargo.toml`: a requirement that the local crate's version does not
+# satisfy fails the build by design (see the comment in that file).
+[patch.crates-io]
+war3-core = { path = "../w3wright/crates/war3-core" }
+war3-archive = { path = "../w3wright/crates/war3-archive" }
+war3-map = { path = "../w3wright/crates/war3-map" }
+war3-terrain = { path = "../w3wright/crates/war3-terrain" }
+war3-project = { path = "../w3wright/crates/war3-project" }
