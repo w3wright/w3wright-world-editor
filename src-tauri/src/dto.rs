@@ -242,6 +242,15 @@ pub struct Member {
 pub struct SavePreview {
     /// The map that was examined.
     pub path: String,
+    /// Whether the question could be answered at all.
+    ///
+    /// ⚠️ `false` is **not** a failure: it means rebuilding does not apply to this archive, which is
+    /// a property of the map rather than a fault. The other view commands carry the same field for
+    /// the same reason (`TerrainView::ok`), so the interface has one shape to handle rather than a
+    /// convention per command.
+    pub ok: bool,
+    /// Why the question does not apply, when it does not. `None` when `ok`.
+    pub not_applicable: Option<String>,
     /// Size of the original file in bytes.
     pub original_bytes: u64,
     /// Size of the rebuilt archive in bytes.
@@ -253,8 +262,8 @@ pub struct SavePreview {
     pub first_difference: Option<u64>,
     /// What the interface should tell the user, in one sentence.
     ///
-    /// Composed here rather than in the front end because it states a fact about the
-    /// *format*, and the interface is not allowed to know those. See `docs/03` §1.1.
+    /// Composed by the core rather than here, because it states a fact about the *format* and it is
+    /// the same sentence `war3 map rebuild` gives. See `docs/03` §1.1.
     pub note: String,
 }
 

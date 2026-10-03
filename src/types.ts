@@ -406,6 +406,16 @@ export interface MapSummary {
  */
 export interface SavePreview {
   path: string
+  /**
+   * Whether the question could be answered at all.
+   *
+   * ⚠️ `false` is not a failure: rebuilding does not apply to this archive, which is a property of
+   * the map. The same field appears on the other view payloads (`TerrainView.ok`), so a screen has
+   * one shape to handle instead of a convention per command.
+   */
+  ok: boolean
+  /** Why it does not apply, when it does not. `null` when `ok`. */
+  notApplicable: string | null
   originalBytes: number
   rebuiltBytes: number
   memberCount: number

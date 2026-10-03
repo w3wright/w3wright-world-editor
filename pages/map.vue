@@ -9,12 +9,7 @@ import EmptyState from '~/components/EmptyState.vue'
  * would promise an edit that does not exist.
  */
 import MapInfoPanel from '~/components/MapInfoPanel.vue'
-import {
-  checkSave,
-  preview,
-  previewNotApplicable,
-  summary
-} from '~/composables/useOpenMap'
+import { checkSave, preview, summary } from '~/composables/useOpenMap'
 import { formatBytes } from '~/format'
 
 defineEmits<{ open: [] }>()
@@ -50,12 +45,12 @@ function firstDifference(value: number | null): string {
       </p>
     </section>
 
-    <section v-if="previewNotApplicable" class="callout-scope">
+    <section v-if="preview && !preview.ok" class="callout-scope">
       <h2 class="callout-head">
         This question cannot be answered for this map
       </h2>
       <p class="callout-note">
-        {{ previewNotApplicable }}
+        {{ preview.notApplicable }}
       </p>
       <p class="callout-because">
         The core is not refusing out of caution here — the member named above cannot be
@@ -65,7 +60,7 @@ function firstDifference(value: number | null): string {
       </p>
     </section>
 
-    <section v-if="preview" class="callout-attention">
+    <section v-if="preview && preview.ok" class="callout-attention">
       <h2 class="callout-head">
         If this map were saved
       </h2>

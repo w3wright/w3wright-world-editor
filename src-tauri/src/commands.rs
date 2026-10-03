@@ -23,8 +23,13 @@
 //! errors already read that way, so they are passed through rather than reworded;
 //! rewording them here would mean two vocabularies for the same failure.
 //!
-//! One distinction the string form has to carry explicitly is that **"this does not
-//! apply to your map" is not "something went wrong"**. [`NOT_APPLICABLE`] marks it.
+//! ⚠️ **This file no longer marks "does not apply" with a string prefix.** It used to: the
+//! operation that can be inapplicable is the rebuild preview, and the fact was in the error type
+//! all along — `MpqError::MemberNotWritable`, which `add_raw` returns for a member whose key is
+//! derived from its block offset (DotA's `(LISTFILE)` is one). Flattening that to
+//! `"not-applicable: …"` meant the front end had to parse the marker back out to tell a limitation
+//! from a fault. `MpqError::is_not_applicable` answers that in the core now, and the marker is
+//! gone rather than kept beside it.
 
 use crate::dto::{
     doodad_record, doodad_summary, object_category, unit_record, unit_summary, DiagnosticView,
@@ -32,24 +37,6 @@ use crate::dto::{
     DETAIL_LIMIT,
 };
 use war3_map::MapSource;
-
-/// Prefix marking a message that means "this does not apply here", not "something
-/// went wrong".
-///
-/// # Why a marker rather than a typed error
-///
-/// Tauri serialises an `Err` from a command as whatever the error type serialises to,
-/// and a plain string is the one shape the front end can show without knowing the
-/// type. A typed enum would be cleaner in Rust and would force the front end to
-/// destructure a tag it has no other use for.
-///
-/// What matters is not the mechanism but that the two cases stay distinguishable:
-/// **the operation does not apply to this map** is not the user's problem to fix,
-/// while **the file could not be read** is. A member whose key is derived from its
-/// block offset cannot be relocated, so the core refuses to rebuild any archive
-/// holding one — DotA's `(LISTFILE)` is such a member, and before this marker the panel
-/// said "could not open that map", which was simply untrue.
-pub const NOT_APPLICABLE: &str = "not-applicable: ";
 
 /// Flattens a core diagnostics collection for the interface.
 ///
@@ -108,67 +95,43 @@ pub fn open_map(path: String) -> Result<MapSummary, String> {
 ///
 /// # Errors
 ///
-/// A message for the interface to show. One starting with [`NOT_APPLICABLE`] means the
-/// operation does not apply to this map rather than that anything failed.
+/// A fault: the file is not an archive, a table is malformed, the disk failed. A map the *operation*
+/// does not apply to is **not** an error — see [`SavePreview::not_applicable`], which is the shape
+/// every other view command uses for the same distinction (`TerrainView::ok` and so on).
 #[tauri::command]
 pub fn preview_save(path: String) -> Result<SavePreview, String> {
-    let original = std::fs::read(&path).map_err(|e| e.to_string())?;
-    let archive = war3_archive::Archive::open(&path).map_err(|e| e.to_string())?;
-
-    // Rebuild every member verbatim, then compare. `add_raw` carries the stored
-    // block through unchanged, so a difference here is a difference the builder
-    // introduced rather than one the caller asked for.
-    let mut builder = war3_archive::ArchiveBuilder::with_prefix(archive.prefix().to_vec())
-        .map_err(|e| e.to_string())?;
-    let mut member_count = 0usize;
-    let mut names = archive.file_names();
-    names.sort_unstable();
-    for name in &names {
-        let raw = archive.raw_member(name).map_err(|e| e.to_string())?;
-        // The one failure that means "cannot", not "broken": a member that cannot be
-        // relocated. Reported as a limitation of this operation on this map.
-        builder
-            .add_raw(raw)
-            .map_err(|e| format!("{NOT_APPLICABLE}{e}"))?;
-        member_count += 1;
+    // ⚠️ The operation is the core's, and deliberately so: the command line's `war3 map rebuild`
+    // performs the same rebuild and must describe it the same way. Doing it here meant two
+    // implementations of "would this change the file", which are free to disagree about a map
+    // without anyone noticing which was right — and the sentence shown to the user was written in
+    // this file.
+    match war3_archive::RebuildPreview::of_file(&path) {
+        Ok(preview) => Ok(SavePreview {
+            path,
+            ok: true,
+            not_applicable: None,
+            original_bytes: preview.original_bytes,
+            rebuilt_bytes: preview.rebuilt_bytes,
+            member_count: preview.member_count,
+            first_difference: preview.first_difference,
+            note: preview.note(),
+        }),
+        // ⚠️ The distinction is read from the core's error type, not from its text. A member whose
+        // key is derived from its block offset cannot be relocated, so *no* rebuild of this archive
+        // could be written — that is a limit of the operation, and the panel says so. Everything
+        // else is a fault and travels the error path.
+        Err(e) if e.is_not_applicable() => Ok(SavePreview {
+            path,
+            ok: false,
+            not_applicable: Some(e.to_string()),
+            original_bytes: 0,
+            rebuilt_bytes: 0,
+            member_count: 0,
+            first_difference: None,
+            note: String::new(),
+        }),
+        Err(e) => Err(e.to_string()),
     }
-    let rebuilt = builder
-        .to_bytes()
-        .map_err(|e| format!("{NOT_APPLICABLE}{e}"))?;
-
-    let first_difference = original
-        .iter()
-        .zip(rebuilt.iter())
-        .position(|(a, b)| a != b)
-        .map(|i| i as u64)
-        .or_else(|| {
-            // A common prefix with different lengths still differs, at the shorter
-            // end. `None` here means byte-identical.
-            (original.len() != rebuilt.len()).then_some(original.len().min(rebuilt.len()) as u64)
-        });
-
-    let note = match first_difference {
-        None => {
-            "A rebuild of this map is byte identical, so saving would change only what you edit."
-                .to_string()
-        }
-        Some(at) => format!(
-            "A rebuild preserves every member's content but rewrites the archive: \
-             {} bytes becomes {}, and the first difference is at offset {at}. Saving would \
-             therefore write a new file rather than patch this one.",
-            original.len(),
-            rebuilt.len(),
-        ),
-    };
-
-    Ok(SavePreview {
-        path,
-        original_bytes: original.len() as u64,
-        rebuilt_bytes: rebuilt.len() as u64,
-        member_count,
-        first_difference,
-        note,
-    })
 }
 
 /// Reads a map's terrain and returns it for display.
@@ -687,32 +650,40 @@ mod tests {
         );
     }
 
-    /// A map that cannot be rebuilt must say so as a limitation, not as a failure.
+    /// A map whose rebuild does not apply must say so as a limitation, not as a failure.
     ///
-    /// DotA's `(LISTFILE)` has `BLOCK_OFFSET_ADJUSTED_KEY`, so the core refuses to
-    /// rebuild the archive. That is a correct refusal about the *operation*, and the
-    /// panel must not report it the way it reports "the file could not be read".
+    /// `W3_TEST_MAP_UNCANNY` is DotA, whose `(LISTFILE)` has `BLOCK_OFFSET_ADJUSTED_KEY`, so the
+    /// core refuses to relocate it and *no* rebuild of that archive can be written. That is a
+    /// correct refusal about the operation.
+    ///
+    /// ⚠️ **The command points this map at itself**, which is the case worth pinning: it does not
+    /// matter whether the variable names a map that can be rebuilt, because both branches are
+    /// checked and the classification itself is asserted through the core's own
+    /// `MpqError::is_not_applicable` rather than through the message text.
     #[test]
-    fn a_map_that_cannot_be_rebuilt_is_reported_as_not_applicable() {
+    fn a_rebuild_that_does_not_apply_is_a_limitation_rather_than_a_failure() {
         let Ok(path) = std::env::var("W3_TEST_MAP_UNCANNY") else {
             return;
         };
-        match preview_save(path.clone()) {
-            Ok(preview) => {
-                // A rebuildable map is fine to point this at; then there is nothing to
-                // check beyond the preview being coherent.
-                assert!(preview.original_bytes > 0);
-            }
-            Err(message) => {
-                assert!(
-                    message.starts_with(NOT_APPLICABLE),
-                    "a rebuild refusal must be marked as not-applicable, got: {message}"
-                );
-                assert!(
-                    message.contains("offset"),
-                    "the reason must name the cause, got: {message}"
-                );
-            }
+        let preview = preview_save(path.clone()).expect("a limitation is not an error");
+        if preview.ok {
+            assert!(preview.original_bytes > 0);
+            assert!(!preview.note.is_empty());
+            assert!(preview.not_applicable.is_none());
+        } else {
+            let why = preview
+                .not_applicable
+                .expect("the reason travels with the flag");
+            assert!(
+                why.contains("offset"),
+                "the reason must name the cause, got: {why}"
+            );
+            // And the same failure classified through the core, which is where the answer lives.
+            let direct = war3_archive::RebuildPreview::of_file(&path).unwrap_err();
+            assert!(
+                direct.is_not_applicable(),
+                "a rebuild refusal must classify as not-applicable, got: {direct}"
+            );
         }
     }
 

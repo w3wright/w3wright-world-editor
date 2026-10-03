@@ -47,14 +47,6 @@ export const busy = ref(false)
 /** The save preview, once asked for. */
 export const preview = ref<SavePreview | null>(null)
 
-/**
- * The save preview could not be produced because the operation does not apply.
- *
- * Kept apart from `error` because the two need different words: a map the core cannot
- * rebuild is not a map that failed to open.
- */
-export const previewNotApplicable = ref<string | null>(null)
-
 /** The terrain of the open map, or `null` when it has not been asked for. */
 export const terrain = ref<TerrainView | null>(null)
 
@@ -78,15 +70,6 @@ export const objects = ref<ObjectView | null>(null)
 
 /** The objects command is in flight. */
 export const objectsBusy = ref(false)
-
-/**
- * Marker the backend puts in front of a message that means "does not apply here".
- *
- * Kept in step with `NOT_APPLICABLE` in `commands.rs`. Both sides name it, because the
- * interface has to tell a limitation from a fault and the backend is the only thing
- * that knows which it is.
- */
-export const NOT_APPLICABLE = 'not-applicable: '
 
 /**
  * Clears the per-map data a new map makes meaningless.
@@ -123,7 +106,6 @@ export async function openPath(target: string): Promise<boolean> {
   busy.value = true
   error.value = null
   preview.value = null
-  previewNotApplicable.value = null
   // Opening a different map invalidates everything read from the previous map.
   // Leaving it would show one map's terrain under another map's name.
   forgetViews()
@@ -192,7 +174,6 @@ export function closeMap(): void {
   summary.value = null
   error.value = null
   preview.value = null
-  previewNotApplicable.value = null
   forgetViews()
 }
 
@@ -293,7 +274,6 @@ export async function checkSave(): Promise<void> {
     return
   busy.value = true
   preview.value = null
-  previewNotApplicable.value = null
   try {
     preview.value = await invoke<SavePreview>('preview_save', {
       path: summary.value.path
@@ -301,11 +281,11 @@ export async function checkSave(): Promise<void> {
   }
   catch (e) {
     preview.value = null
-    const message = String(e)
-    if (message.startsWith(NOT_APPLICABLE))
-      previewNotApplicable.value = message.slice(NOT_APPLICABLE.length)
-    else
-      error.value = message
+    // ⚠️ Not classified here any more. A map the core cannot rebuild is a **limitation of that
+    // map**, not a failure, and the distinction lives in the core's own error type
+    // (`MpqError::is_not_applicable`). This used to look for a `not-applicable: ` marker that
+    // `commands.rs` glued onto the message, which meant both sides had to keep a string in step.
+    error.value = String(e)
   }
   finally {
     busy.value = false
