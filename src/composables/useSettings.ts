@@ -1,6 +1,7 @@
 import type { GameView, MapBrowser, SettingsView, StatusView } from '../types'
 import { invoke } from '@tauri-apps/api/core'
 import { computed, ref } from 'vue'
+import { forgetNames } from './useObjectNames'
 
 /**
  * The user's settings and the game the app would use, shared across the window.
@@ -153,8 +154,12 @@ export async function saveWar3Dir(dir: string): Promise<boolean> {
     settings.value = await invoke<SettingsView>('settings_save', {
       settings: { war3Dir: dir.trim(), path: settings.value?.path ?? null }
     })
-    // The game may now resolve to a different installation, so the cached answer is stale.
+    // The game may now resolve to a different installation, so the cached answer is stale. The
+    // backend drops its own name engine in `settings_save`; this drops the names the *interface*
+    // remembered, which is the other half — without it the panels would keep the previous
+    // installation's names and the symptom would be names in the wrong language.
     status.value = null
+    forgetNames()
     await refreshStatus()
     // The notice expires on its own, so a save and a launch do not stack up as two lines the
     // user has to find and dismiss.

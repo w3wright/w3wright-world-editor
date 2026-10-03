@@ -77,26 +77,29 @@ defineEmits<{ open: [], browse: [] }>()
  * buttons and filled rather than outlined. A scoped rule rather than a shortcut because this is
  * the app's only primary action — a shortcut used at one call site hides more than it saves.
  *
- * The colour is a literal rather than a theme token: it is the one accent in an otherwise grey
- * app, and a token for a single use is a variable nobody can change safely.
+ * ⚠️ The comment here used to argue the opposite — that the colour should be a literal "because it
+ * is the one accent in an otherwise grey app, and a token for a single use is a variable nobody can
+ * change safely". The premise had already stopped being true: by the time it was noticed, the accent
+ * appeared in four components and its pressed shade had drifted into three different values. A value
+ * with four writers is exactly what needs one source, so it is `--accent` in `base.css` now.
  */
 .welcome-btn {
   padding: 0.5rem 1.15rem;
   font-size: 0.92rem;
   font-family: inherit;
-  color: #fff;
+  color: var(--on-accent);
   border: 0;
   border-radius: 6px;
-  background: #2f6feb;
+  background: var(--accent);
   cursor: default;
 }
 
 .welcome-btn:hover {
-  background: #2a63d2;
+  background: var(--accent-hover);
 }
 
 .welcome-btn:active {
-  background: #2559bd;
+  background: var(--accent-press);
 }
 
 /*
@@ -125,7 +128,7 @@ defineEmits<{ open: [], browse: [] }>()
 }
 
 .welcome-btn:focus-visible {
-  outline: 2px solid #2f6feb;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 </style>

@@ -14,6 +14,7 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import MapBrowser from './components/MapBrowser.vue'
 import MenuBar from './components/MenuBar.vue'
+import StatusBar from './components/StatusBar.vue'
 import TitleBar from './components/TitleBar.vue'
 import { closeMap, error, openPath, openPickedMap, summary } from './composables/useOpenMap'
 import { clearNotice, ensureStatus, game, launchGame, notice } from './composables/useSettings'
@@ -158,6 +159,13 @@ function onAction(id: NavAction['id']): void {
       -->
       <RouterView @open="onOpen" @browse="browsing = true" @close="onClose" />
     </main>
+
+    <!--
+      ⚠️ Outside `<main>`, which is the scrolling region. A status bar inside the scroll container
+      would scroll away, and one that is only present while something is loading would shift the whole
+      page whenever work started or finished — the opposite of what a status bar is for.
+    -->
+    <StatusBar />
 
     <MapBrowser
       v-if="browsing"

@@ -4132,7 +4132,9 @@ dependencies = [
  "tauri-plugin-opener",
  "war3-archive",
  "war3-core",
+ "war3-game",
  "war3-map",
+ "war3-meta",
  "war3-object",
  "war3-project",
  "war3-terrain",
@@ -4169,6 +4171,15 @@ name = "war3-core"
 version = "0.0.3"
 
 [[package]]
+name = "war3-game"
+version = "0.0.3"
+dependencies = [
+ "war3-archive",
+ "war3-core",
+ "war3-meta",
+]
+
+[[package]]
 name = "war3-map"
 version = "0.0.3"
 dependencies = [
@@ -4190,6 +4201,7 @@ name = "war3-object"
 version = "0.0.3"
 dependencies = [
  "war3-core",
+ "war3-map",
  "war3-meta",
 ]
 

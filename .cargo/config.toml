@@ -44,3 +44,4 @@ war3-terrain = { path = "../w3wright/crates/war3-terrain" }
 war3-project = { path = "../w3wright/crates/war3-project" }
 war3-meta = { path = "../w3wright/crates/war3-meta" }
 war3-object = { path = "../w3wright/crates/war3-object" }
+war3-game = { path = "../w3wright/crates/war3-game" }

@@ -40,6 +40,22 @@
   color: #0f0f0f;
   background-color: #f6f6f6;
 
+  /*
+   * The accent, and the two shades its hover and press use.
+   *
+   * ⚠️ These were **twelve copies of one colour** across four components' scoped styles, and the
+   * pressed shade had drifted into three different values (`#2a63d2`, `#2559bd`, `#2861d4`) — which
+   * is what a value with no single source does: nobody was wrong, they were just each choosing.
+   * Declaring them once is also what makes "the accent" a thing this app can be said to have.
+   *
+   * `--on-accent` is the text colour **on** a filled accent button. It is not `#fff` on dark: the
+   * accent keeps its blue in both schemes, so the text on it stays light in both.
+   */
+  --accent: #2f6feb;
+  --accent-hover: #2a63d2;
+  --accent-press: #2559bd;
+  --on-accent: #fff;
+
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;

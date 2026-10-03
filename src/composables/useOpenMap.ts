@@ -9,6 +9,7 @@ import type {
 import { invoke } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { ref } from 'vue'
+import { addStep, finishTask, startTask } from './useTasks'
 
 /**
  * The open map, shared across routes.
@@ -109,8 +110,20 @@ export async function openPath(target: string): Promise<boolean> {
   // Opening a different map invalidates everything read from the previous map.
   // Leaving it would show one map's terrain under another map's name.
   forgetViews()
+
+  // ⚠️ The steps are named for what the user is waiting on, and the first two are one call on the
+  // backend: opening an archive and parsing the map inside it cannot be reported separately without
+  // splitting that command, and a spinner that lies about its own granularity is worse than one that
+  // does not claim any. They are listed because they are the two things that actually take the time,
+  // and the tooltip's per-step timings are what tell a reader which of them was slow.
+  const task = startTask('Opening a map')
   try {
+    addStep(task, 'Opening the archive and reading the map')
     summary.value = await invoke<MapSummary>('open_map', { path: wanted })
+    // ⚠️ Announced, not measured: the name tables are read inside `open_map` too, on the first open,
+    // because the map's own object names have to be loaded before any panel can ask for one. See
+    // `src-tauri/src/names.rs`.
+    addStep(task, 'Loading object names from the game')
     return true
   }
   catch (e) {
@@ -121,6 +134,7 @@ export async function openPath(target: string): Promise<boolean> {
     return false
   }
   finally {
+    finishTask(task)
     busy.value = false
   }
 }

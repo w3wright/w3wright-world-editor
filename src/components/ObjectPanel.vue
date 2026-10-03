@@ -2,18 +2,15 @@
 /**
  * The object view: the seven `war3map.w3*` files a map holds.
  *
- * Read-only, and the one view here whose data has a **name for every field that this
- * app cannot show**. `war3 map objects` turns `uhpm` into "Hit Points" only when it is
- * given `--game-dir`, because the metadata tables live in the game's archives rather
- * than the map. This app has no game-directory setting, so it prints ids and values —
- * exactly what the command line prints without that flag.
- *
- * ⚠️ That is why there is no name lookup, no `ObjectKind` list and no field table in
- * this file: any of those would be a second, worse copy of `war3-meta`, and a wrong
- * name is harder to notice than an id.
+ * Read-only. Both the objects and their fields are shown by **name**, resolved from the game
+ * installation: `hC06` is 守卫 (基本建造者), `unam` is 名字, and the ids inside a value — `uabi`'s six
+ * abilities — are resolved too. ⚠️ Every one of those comes from the core's tables rather than from a
+ * mapping here, because the text lives in the installation's own language files.
  */
 import type { ObjectCategory, ObjectEntry, ObjectView } from '../types'
 import { computed } from 'vue'
+import FieldValue from './FieldValue.vue'
+import ObjectName from './ObjectName.vue'
 
 const props = defineProps<{ objects: ObjectView }>()
 
@@ -35,11 +32,6 @@ const totals = computed(() => {
   }
   return { original, custom, all: original + custom }
 })
-
-/** `id <- base`, or just the id for a modified original. */
-function inheritance(object: ObjectEntry): string {
-  return object.baseId ? `${object.id} <- ${object.baseId}` : object.id
-}
 
 /**
  * How many of an object's modifications the panel is not showing.
@@ -105,12 +97,12 @@ function listed(category: ObjectCategory): ObjectEntry[] {
       </dl>
 
       <p class="m-0 mt-3 max-w-46rem border-l-3 border-slate-400 pl-3 text-0.85rem">
-        <strong>Field ids are shown as stored.</strong>
-        Naming a field needs Blizzard's <code class="text-0.9em font-mono">*MetaData.slk</code>
-        tables, which live in the game's archives rather than the map — that is what
-        <code class="text-0.9em font-mono">war3 map objects --game-dir</code> is for.
-        This app has no game directory, so what follows is the command line's own
-        output without it, not a truncated version of the named one.
+        <strong>Field names and ids inside values come from the installed game.</strong>
+        Both need Blizzard's <code class="text-0.9em font-mono">*MetaData.slk</code> tables, which live
+        in the game's archives rather than the map — the same tables
+        <code class="text-0.9em font-mono">war3 map objects --game-dir</code> uses. Without a game
+        directory configured, a field shows its id and a value its stored form, which is what the
+        command line prints without that flag.
       </p>
 
       <section v-for="category in objects.categories" :key="category.mapFile">
@@ -147,7 +139,19 @@ function listed(category: ObjectCategory): ObjectEntry[] {
             <template v-for="object in listed(category)" :key="`${category.mapFile}:${object.id}`">
               <tr class="object-head">
                 <td colspan="4">
-                  <span class="font-600 mono">{{ inheritance(object) }}</span>
+                  <span class="font-600">
+                    <!--
+                      The object's own name, then what it inherits from. ⚠️ The category's `kind` is
+                      the core's spelling of the *table* (`unit`, `item`, …), so it is passed through
+                      rather than mapped here: a second table of kind names in the interface is exactly
+                      the divergence `docs/03` §1.1 forbids.
+                    -->
+                    <ObjectName :id="object.id" :kind="category.kind" />
+                    <template v-if="object.baseId">
+                      <span class="mx-1 opacity-50">←</span>
+                      <ObjectName :id="object.baseId" :kind="category.kind" />
+                    </template>
+                  </span>
                   <span v-if="object.hero" class="ml-2 text-0.8em opacity-70">hero</span>
                   <span class="ml-2 text-0.8em opacity-60">
                     {{ object.modifications.toLocaleString() }}
@@ -160,11 +164,16 @@ function listed(category: ObjectCategory): ObjectEntry[] {
               </tr>
               <tr v-for="(m, i) in object.shown" :key="i">
                 <td />
-                <td class="mono">
-                  {{ m.field }}
+                <!--
+                  The field's name, with its id on hover. ⚠️ The id is still shown when the metadata
+                  does not describe the field — an object written by a tool that invented one — because
+                  `m.field` is what is really in the file and a blank cell would hide that.
+                -->
+                <td class="mono" :title="m.field">
+                  {{ m.fieldLabel ?? m.field }}
                 </td>
                 <td class="break-all">
-                  {{ m.value }}
+                  <FieldValue :modification="m" />
                 </td>
                 <td class="mono opacity-70">
                   <template v-if="m.level !== null">

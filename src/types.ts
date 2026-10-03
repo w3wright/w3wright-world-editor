@@ -112,6 +112,31 @@ export interface Launch {
   map: string
 }
 
+/** One ID to look up, for the batch name command. */
+export interface NameQuery {
+  /** Which table to consult: `unit`, `item`, `ability`, … — the core's own spelling. */
+  kind: string
+  /** The object's four-character id. */
+  id: string
+}
+
+/** What one ID is called. */
+export interface NameAnswer {
+  /** Echoed back, so a caller can match answers to a batch without relying on order. */
+  kind: string
+  /** Echoed back, for the same reason. */
+  id: string
+  /**
+   * The name, which is the id itself when nothing knows it.
+   *
+   * ⚠️ Markup is not stripped: a name may carry `|cffffff00…|r`, and decoding that is
+   * `war3_map::plain`'s job in the core.
+   */
+  name: string
+  /** `map`, `game` or `id` — the core's own label for where the name came from. */
+  source: string
+}
+
 /** One archive member. */
 export interface Member {
   name: string
@@ -140,7 +165,16 @@ export interface Extractability {
 export interface DiagnosticView {
   severity: string
   code: string
+  /**
+   * The message, as the command line prints it.
+   *
+   * ⚠️ Where `subject` is set this still begins `"<subject>: "`, because the command line prints it
+   * on a line where nothing else says which member it concerns. A consumer with its own name column
+   * shows `subject` and takes the message from the core's prefix-free form instead.
+   */
   message: string
+  /** What the diagnostic is about — a member name, a field id — or `null` for the file as a whole. */
+  subject: string | null
 }
 
 /** Terrain measurements, all as the core reports them. */
@@ -312,15 +346,38 @@ export interface DoodadView {
 
 /** One field change on an object. */
 export interface ObjectModification {
+  /** The field's four-character id, e.g. `unam`. Shown on hover beside the label. */
   field: string
   /**
-   * The value as text.
+   * What the game calls this field, e.g. 名字 for `unam`, or `null` when the metadata does not
+   * describe it.
    *
-   * The core distinguishes four storage types (integer, real, unreal, string) and
-   * this is already flattened, because nothing on a read-only screen acts on the
-   * type.
+   * ⚠️ Resolved in the backend from `*MetaData.slk`'s `displayName` column **and** the string table it
+   * points into. It cannot be reproduced here: the middle hop is a `WESTRING_*` key whose text lives in
+   * another file, in the installation's language.
+   */
+  fieldLabel: string | null
+  /**
+   * The field's `type` word, e.g. `abilityList`.
+   *
+   * This is what says the value's comma-separated parts are **object ids** worth resolving. `null` for
+   * an int or a plain string, which is most fields.
+   */
+  valueType: string | null
+  /**
+   * The value as text, exactly as the file stores it.
+   *
+   * For a list-valued field the interface splits this and resolves each part; for every other field
+   * `valueLabel` is what to show.
    */
   value: string
+  /**
+   * What to show when the value is **not** a list of ids; `null` when it is.
+   *
+   * Three cases: a `TRIGSTR_nnn` reference resolved through the map, a word like `hero` turned into
+   * 英雄, or a number that was already its own text.
+   */
+  valueLabel: string | null
   /** Which level the value applies to, `0` meaning every level. */
   level: number | null
   dataIndicator: number | null

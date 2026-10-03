@@ -93,3 +93,18 @@ war3-terrain = "0.0.3"
 # `war3-meta` comes with it transitively (`ObjectKind` is re-exported from there),
 # and it is likewise unpublished, so it is in the patch list too.
 war3-object = "0.0.3"
+# Object names, and the game installation's data behind them. ⚠️ **Not published to
+# crates.io yet**, so a release build cannot resolve it either — the local `[patch]` is
+# what makes this line work today, and publishing it is part of the change that needs it.
+#
+# This is the crate that answers "what is `hfoo` called": it reads the game's own
+# `*Strings.txt`, `Doodads.slk` and `UI\WorldEditStrings.txt` out of `war3.mpq` and
+# friends, and it holds the archive load order that decides which copy of a table wins.
+# Nothing of that belongs here — a second implementation of it in the interface is exactly
+# what `docs/03` §1.1 forbids.
+war3-game = { version = "0.0.3", features = [ "mpq" ] }
+# ⚠️ Named directly because this crate passes `ObjectKind` to `war3-game`'s resolver rather
+# than reaching it through `war3-object`'s re-export. A re-export is for callers that already
+# depend on the crate doing the re-exporting, and this one does not need `war3-object` for
+# anything in `names.rs`.
+war3-meta = "0.0.3"

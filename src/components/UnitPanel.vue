@@ -12,6 +12,7 @@
  */
 import type { UnitRecord, UnitView } from '../types'
 import { computed } from 'vue'
+import ObjectName from './ObjectName.vue'
 
 const props = defineProps<{ units: UnitView }>()
 
@@ -136,7 +137,7 @@ function itemFigure(record: UnitRecord): number {
         <tbody>
           <tr v-for="type in units.info.types.leaders" :key="type.key">
             <td class="mono">
-              {{ type.key }}
+              <ObjectName :id="type.key" kind="unit" show-id />
             </td>
             <td class="text-right mono">
               {{ type.count.toLocaleString() }}
@@ -204,8 +205,13 @@ function itemFigure(record: UnitRecord): number {
         </thead>
         <tbody>
           <tr v-for="(record, i) in units.records" :key="i">
+            <!--
+              The name, with the id on hover. `show-id` because this column is the table's first and a
+              reader comparing two rows needs to tell units apart even when the game has no name for
+              one of them — see `ObjectName`.
+            -->
             <td class="mono">
-              {{ record.kind }}
+              <ObjectName :id="record.kind" kind="unit" show-id />
             </td>
             <td class="mono">
               {{ record.variation }}

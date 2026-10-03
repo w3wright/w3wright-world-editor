@@ -11,6 +11,7 @@
  */
 import type { DoodadRecord, DoodadView } from '../types'
 import { computed } from 'vue'
+import ObjectName from './ObjectName.vue'
 
 const props = defineProps<{ doodads: DoodadView }>()
 
@@ -127,7 +128,7 @@ function position(record: DoodadRecord): string {
         <tbody>
           <tr v-for="type in doodads.info.types.leaders" :key="type.key">
             <td class="mono">
-              {{ type.key }}
+              <ObjectName :id="type.key" kind="doodad" show-id />
             </td>
             <td class="text-right mono">
               {{ type.count.toLocaleString() }}
@@ -181,7 +182,7 @@ function position(record: DoodadRecord): string {
         <tbody>
           <tr v-for="(record, i) in doodads.records" :key="i">
             <td class="mono">
-              {{ record.kind }}
+              <ObjectName :id="record.kind" kind="doodad" show-id />
             </td>
             <td class="mono">
               {{ record.variation }}

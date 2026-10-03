@@ -199,6 +199,36 @@ pub struct Extractability {
     pub reason: Option<String>,
 }
 
+/// One ID to look up.
+///
+/// `kind` uses the core's own spelling (`unit`, `item`, `ability`, …) so that a caller reads it from
+/// the same vocabulary the panels and the command line use.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NameQuery {
+    /// Which table to consult.
+    pub kind: String,
+    /// The object's four-character id.
+    pub id: String,
+}
+
+/// What one ID is called.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NameAnswer {
+    /// Echoed back, so a caller can match answers to a batch without relying on order.
+    pub kind: String,
+    /// Echoed back, for the same reason.
+    pub id: String,
+    /// The name, which is the id itself when nothing knows it.
+    ///
+    /// ⚠️ Markup is **not** stripped here: a name may carry `|cffffff00…|r`, and decoding that is
+    /// `war3_map::plain`'s job — one function, used by the command line and the panels alike.
+    pub name: String,
+    /// `map`, `game` or `id` — the core's own label for where the name came from.
+    pub source: String,
+}
+
 /// One archive member, as the interface lists it.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -486,57 +516,33 @@ pub struct TypeSummary {
 /// point: a user comparing the panel against the command line must see the same list.
 pub const LEADER_COUNT: usize = 12;
 
-/// Ranks a histogram, commonest first, ties by key.
+/// Builds a [`TypeSummary`] from a histogram the core counted.
 ///
-/// The tie-break matters more than it sounds: `HashMap` iteration order would otherwise
-/// shuffle equal-count types between runs, and a list that reorders itself is one nobody
-/// can compare against a printed one.
-fn ranked(counts: &std::collections::BTreeMap<String, u32>) -> Vec<TypeCount> {
-    let mut ranked: Vec<TypeCount> = counts
-        .iter()
-        .map(|(key, count)| TypeCount {
-            key: key.clone(),
-            count: *count,
-        })
-        .collect();
-    ranked.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.key.cmp(&b.key)));
-    ranked
-}
-
-/// Lists a histogram in key order, for the ones that are not ranked.
+/// # Why the whole histogram is carried as well as the head
 ///
-/// The player histogram is the case: `war3 map units` prints players in ascending
-/// numeric order and the numbers are their own sort key, so ranking it by count would put
-/// player 12's hundred units below player 0's one and read as a bug.
-fn ascending(counts: &std::collections::BTreeMap<i32, u32>) -> Vec<TypeCount> {
-    counts
-        .iter()
-        .map(|(player, count)| TypeCount {
-            key: format!("player {player}"),
-            count: *count,
-        })
-        .collect()
-}
-
-/// Builds a [`TypeSummary`] from a histogram.
-fn type_summary(counts: &std::collections::BTreeMap<String, u32>) -> TypeSummary {
-    let ranked = ranked(counts);
-    let total = ranked.iter().map(|entry| entry.count).sum();
+/// `war3 map units` prints **twelve rows** while `(4)LostTemple.w3m` has **22** distinct unit types,
+/// so a head alone cannot say how much it is a head *of*. The core returns the complete histogram
+/// and the two views take what each needs — the cap is a display decision and lives at the display.
+fn type_summary(counts: Vec<war3_map::CountEntry<String>>) -> TypeSummary {
     TypeSummary {
-        distinct: count(ranked.len()),
-        total,
-        leaders: ranked.iter().take(LEADER_COUNT).cloned().collect(),
-        counts: ranked,
+        distinct: count(counts.len()),
+        total: counts.iter().map(|entry| entry.count).sum(),
+        leaders: counts
+            .iter()
+            .take(LEADER_COUNT)
+            .cloned()
+            .map(entry)
+            .collect(),
+        counts: counts.into_iter().map(entry).collect(),
     }
 }
 
-/// The player histogram, as the panel prints it.
-fn by_player(units: &[war3_map::Unit]) -> Vec<TypeCount> {
-    let mut counts = std::collections::BTreeMap::new();
-    for unit in units {
-        *counts.entry(unit.player).or_insert(0u32) += 1;
+/// One core count entry as the interface's shape.
+fn entry(from: war3_map::CountEntry<String>) -> TypeCount {
+    TypeCount {
+        key: from.key,
+        count: from.count,
     }
-    ascending(&counts)
 }
 
 /// How many records the detail list keeps.
@@ -656,14 +662,45 @@ pub struct DoodadInfo {
 #[serde(rename_all = "camelCase")]
 pub struct ObjectModification {
     /// The field's four-character id, e.g. `unam` for a unit's name.
+    ///
+    /// ⚠️ Kept alongside `field_label` rather than replaced by it: the id is what the file stores, and
+    /// a reader comparing the editor against the file — or against `war3 map objects` — needs it.
     pub field: String,
+    /// What the game calls this field, e.g. 名字 for `unam`, or `None` when the metadata does not
+    /// describe it.
+    ///
+    /// ⚠️ Resolved from the game's `*MetaData.slk` `displayName` column **and** the string table it
+    /// points into — a three-hop chain that cannot be reproduced here, because the middle hop is a
+    /// `WESTRING_*` key whose text is in another file, in the installation's language.
+    pub field_label: Option<String>,
+    /// The field's `type` word, e.g. `abilityList`.
+    ///
+    /// This is what tells the interface whether the value's comma-separated parts are **object ids**
+    /// worth resolving to names. `None` for an int or a plain string, which is most fields.
+    pub value_type: Option<String>,
     /// The value, as the core's own `Display` renders it.
     ///
-    /// ⚠ `FieldValue` distinguishes four storage types and this collapses them to text.
-    /// That is deliberate and it is the only place the distinction is lost: nothing on a
-    /// read-only screen acts on the type, and a name for it would come from the metadata
-    /// tables, which live in the game's archives rather than the map.
+    /// ⚠️ `FieldValue` distinguishes four storage types and this collapses them to text. The type that
+    /// matters for display is [`ObjectModification::value_type`], which is the **field's** declared
+    /// type: it says whether the parts of this string are ids. `uabi` holds
+    /// `A04M,A03Y,Ahrp,A005,A001,A00M` — six ability ids — and resolving them is what turns a column
+    /// of codes into a list of names.
+    ///
+    /// ⚠️ For a **list-valued** field this is the raw string and the interface splits and resolves it.
+    /// For every other field it is still what the file stores, and [`Self::value_label`] is what to
+    /// show — they differ whenever the stored form is a word or a reference.
     pub value: String,
+    /// What to show for the value, when it is **not** a list of object ids; `None` when it is.
+    ///
+    /// Three cases, all measured against a real map:
+    ///
+    /// - `ua1t` = `hero` → 英雄: a **word**, whose text is a section of `UI\UnitEditorData.txt`
+    /// - `unam` = `TRIGSTR_4227` → the map's own text: a reference into `war3map.wts`
+    /// - `uhpm` = `100` → `100`: a number, already its own text
+    ///
+    /// `None` for a list is not "no label" — it is "the label is not computable here", because it
+    /// needs one name lookup per comma-separated part.
+    pub value_label: Option<String>,
     /// Which level the value applies to, or `null` when the kind is not levelled.
     ///
     /// 0 means "every level". Which kinds carry the block is the core's `is_levelled`, not
@@ -755,52 +792,49 @@ fn count(value: usize) -> u32 {
 }
 
 /// Builds the unit header numbers and histogram.
+///
+/// ⚠️ The numbers are `war3_map::UnitSummary`'s, which is the **same** implementation
+/// `war3 map units` prints from. They used to be counted here as well, with the same tie-break rule
+/// written out in both places — a coincidence rather than a guarantee, and the symptom of it ending
+/// would have been a panel and a command line that cannot be compared row by row.
 pub fn unit_summary(units: &war3_map::UnitFile) -> UnitInfo {
-    let mut kinds = std::collections::BTreeMap::new();
-    for unit in &units.units {
-        *kinds.entry(unit.kind.to_string()).or_insert(0u32) += 1;
-    }
-
+    let summary = war3_map::UnitSummary::of(units);
     UnitInfo {
-        version: units.version,
-        subversion: units.subversion,
-        records: count(units.units.len()),
-        levelled: count(units.units.iter().filter(|u| u.hero_level > 1).count()),
-        placed_items: count(
-            units
-                .units
-                .iter()
-                .filter(|u| u.item_table.is_some_and(|t| t >= 0) || !u.inventory.is_empty())
-                .count(),
-        ),
+        version: summary.version,
+        subversion: summary.subversion,
+        records: summary.records,
+        levelled: summary.levelled,
+        placed_items: summary.placed_items,
         shown: count(units.units.len().min(DETAIL_LIMIT)),
-        types: type_summary(&kinds),
-        players: by_player(&units.units),
+        types: type_summary(summary.types.ranked()),
+        players: summary
+            .players
+            .iter()
+            .map(|(player, count)| TypeCount {
+                key: format!("player {player}"),
+                count: *count,
+            })
+            .collect(),
     }
 }
 
 /// Builds the doodad header numbers and histogram.
 pub fn doodad_summary(doodads: &war3_map::DoodadFile) -> DoodadInfo {
-    let mut kinds = std::collections::BTreeMap::new();
-    for doodad in &doodads.doodads {
-        *kinds.entry(doodad.kind.to_string()).or_insert(0u32) += 1;
-    }
-    let mut special_kinds = std::collections::BTreeMap::new();
-    for special in &doodads.special {
-        *special_kinds
-            .entry(special.kind.to_string())
-            .or_insert(0u32) += 1;
-    }
-
+    let summary = war3_map::DoodadSummary::of(doodads);
     DoodadInfo {
-        version: doodads.version,
-        subversion: doodads.subversion,
-        special_version: doodads.special_version,
-        records: count(doodads.doodads.len()),
-        special: count(doodads.special.len()),
-        special_kinds: ranked(&special_kinds),
+        version: summary.version,
+        subversion: summary.subversion,
+        special_version: summary.special_version,
+        records: summary.records,
+        special: summary.special,
+        special_kinds: summary
+            .special_types
+            .ranked()
+            .into_iter()
+            .map(entry)
+            .collect(),
         shown: count(doodads.doodads.len().min(DETAIL_LIMIT)),
-        types: type_summary(&kinds),
+        types: type_summary(summary.types.ranked()),
     }
 }
 
@@ -846,7 +880,11 @@ pub fn doodad_record(doodad: &war3_map::Doodad) -> DoodadRecord {
 }
 
 /// Flattens one object, keeping at most [`MODIFICATION_LIMIT`] modifications.
-fn object_entry(object: &war3_object::Object) -> ObjectEntry {
+///
+/// `kind` is passed down for one reason: a field's label and type are looked up **per object kind**,
+/// because the same four letters can mean different things in two tables. It comes from the file the
+/// object was parsed out of rather than from a guess, so it cannot disagree with the ids inside.
+fn object_entry(object: &war3_object::Object, kind: war3_object::ObjectKind) -> ObjectEntry {
     ObjectEntry {
         id: object.id.to_string(),
         base_id: if object.base_id.is_zero() {
@@ -860,11 +898,42 @@ fn object_entry(object: &war3_object::Object) -> ObjectEntry {
             .modifications
             .iter()
             .take(MODIFICATION_LIMIT)
-            .map(|m| ObjectModification {
-                field: m.field.to_string(),
-                value: m.value.to_string(),
-                level: m.level.map(|l| l.level),
-                data_indicator: m.level.map(|l| l.data_indicator),
+            .map(|m| {
+                let field = m.field.to_string();
+                let value_type = crate::names::field_type(kind, &field);
+                let raw = m.value.to_string();
+                // ⚠️ A list-valued field is left **unresolved** here on purpose. Its parts are object
+                // ids, and the interface already has a batched, coalescing resolver for exactly that
+                // (`useObjectNames`) — resolving them here as well would be a second path to the same
+                // answer, and it would put the splitting rule in two places.
+                //
+                // ⚠️ The test is the core's `value_shape` and not `list_element_kind`: `techList`
+                // (`ureq` = `R00M,R00T`) is a list of ids whose **kind is not fixed** — they may be
+                // units, items, abilities or upgrades — so `list_element_kind` answers `None` for it and
+                // a check built on that would treat a list of ids as a single value.
+                let is_list =
+                    war3_game::value_shape(value_type.as_deref()) == war3_game::ValueShape::IdList;
+                let value_label = if is_list {
+                    None
+                } else {
+                    Some(crate::names::value_text(
+                        &raw,
+                        value_type.as_deref(),
+                        crate::names::map_strings().as_ref(),
+                    ))
+                };
+
+                ObjectModification {
+                    // ⚠️ Resolved from the game's metadata, not from a table in this file. Before
+                    // this, the screen showed `unam`, `uabi`, `uahp` — the ids the file stores.
+                    field_label: crate::names::field_label(kind, &field),
+                    value_type,
+                    field,
+                    value: raw,
+                    value_label,
+                    level: m.level.map(|l| l.level),
+                    data_indicator: m.level.map(|l| l.data_indicator),
+                }
             })
             .collect(),
     }
@@ -875,19 +944,20 @@ fn object_entry(object: &war3_object::Object) -> ObjectEntry {
 /// The entries are truncated per table rather than across both, because the two are
 /// printed as separate lists — the same split `war3 map objects` uses.
 pub fn object_category(file: &war3_object::ObjectFile, kind_name: &str) -> ObjectCategory {
+    let kind = file.kind;
     let custom_objects: Vec<ObjectEntry> = file
         .table
         .custom
         .iter()
         .take(DETAIL_LIMIT)
-        .map(object_entry)
+        .map(|object| object_entry(object, kind))
         .collect();
     let modified_objects: Vec<ObjectEntry> = file
         .table
         .original
         .iter()
         .take(DETAIL_LIMIT)
-        .map(object_entry)
+        .map(|object| object_entry(object, kind))
         .collect();
 
     ObjectCategory {
@@ -915,7 +985,15 @@ pub struct DiagnosticView {
     /// Stable code, e.g. `wts.missing-key`.
     pub code: String,
     /// Human-readable message, including the numbers involved.
+    ///
+    /// ⚠️ Where `subject` is set this **still begins** `"<subject>: "`, because it is the sentence
+    /// `war3 map list` prints, and there the line stands alone. A consumer with its own column for
+    /// the name uses `subject` and shows the message as it is — see `disposition_reason`, which is
+    /// built from the core's `display_message`.
     pub message: String,
+    /// What the diagnostic is about — a member name, a field id — or `None` when it is about the
+    /// file as a whole.
+    pub subject: Option<String>,
 }
 
 impl MapSummary {
@@ -968,7 +1046,17 @@ impl MapSummary {
                     name: name.to_owned(),
                     size: block.uncompressed_size,
                     disposition,
-                    disposition_reason: strip_member_prefix(&reason, name),
+                    // ⚠️ Used as given. This table has a name column, so the message must not repeat
+                    // the name — and it no longer does: the core keeps the `"<name>: "` prefix for
+                    // the command line (where the line stands alone) and hands a consumer with its
+                    // own column the prefix-free text through `Diagnostic::display_message`, which
+                    // is what `Disposition::KeptBinary`'s reason is built from.
+                    //
+                    // It used to be stripped here, by string surgery on the core's own sentence:
+                    // `strip_prefix(name).and_then(|r| r.strip_prefix(": "))`. That was a second
+                    // implementation of the core's formatting, and it would have gone on quietly
+                    // working until the wording changed.
+                    disposition_reason: reason,
                 })
             })
             .collect();
@@ -1011,6 +1099,7 @@ impl MapSummary {
                 severity: d.severity.to_string(),
                 code: d.code.to_string(),
                 message: d.message.clone(),
+                subject: d.subject.clone(),
             })
             .collect();
 
@@ -1239,51 +1328,4 @@ mod tests {
         );
         eprintln!("decoded name: {:?}", summary.name);
     }
-}
-
-/// Removes a leading `name: ` from a core diagnostic, for display beside the name.
-///
-/// The core's messages are written to stand alone on one line of `war3 map list`, and
-/// that is exactly right there — the reader has no other column telling them which
-/// member the line is about. In a table that *does* have a name column, the prefix is
-/// noise: "(ATTRIBUTES)" printed twice in one row.
-///
-/// Only the exact `name: ` form is removed, and only from the front, so a message that
-/// happens to contain the name elsewhere is left alone. The core's wording is not
-/// otherwise touched: it is still the sentence the command-line tool prints, which is
-/// what lets a user compare the two.
-#[must_use]
-fn strip_member_prefix(reason: &str, name: &str) -> String {
-    reason
-        .strip_prefix(name)
-        .and_then(|rest| rest.strip_prefix(": "))
-        .unwrap_or(reason)
-        .to_owned()
-}
-/// The name is removed from a diagnostic shown beside the name, and nothing else is.
-#[test]
-fn the_member_name_is_stripped_only_as_a_prefix() {
-    assert_eq!(
-        strip_member_prefix("WAR3MAP.WTS: no text form", "WAR3MAP.WTS"),
-        "no text form"
-    );
-    // A name that merely appears later must be left alone: the sentence is the
-    // core's, and rewriting the middle of it would make the two views disagree.
-    assert_eq!(
-        strip_member_prefix(
-            "kept as binary: WAR3MAP.WTS could not be parsed",
-            "WAR3MAP.WTS"
-        ),
-        "kept as binary: WAR3MAP.WTS could not be parsed"
-    );
-    // A colon that is not the separator.
-    assert_eq!(
-        strip_member_prefix("WAR3MAP.WTS:", "WAR3MAP.WTS"),
-        "WAR3MAP.WTS:"
-    );
-    // No name at all.
-    assert_eq!(
-        strip_member_prefix("this workspace cannot decode it", "WAR3MAP.WTS"),
-        "this workspace cannot decode it"
-    );
 }

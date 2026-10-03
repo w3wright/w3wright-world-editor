@@ -10,21 +10,16 @@
 //!   by the core once it is opened, and a file that is not a map is rejected there.
 //! - **How to start the game on a map.** A command line.
 //!
-//! ⚠️ The distinction that keeps this honest: `list_maps` says a file is *offered*, never that it
-//! is a map. It filters by extension because the game does, and the core has the final say when
-//! one is opened. Deciding "this is a valid map" by looking at a filename is the trap this avoids.
+//! ⚠️ One thing that *looks* like the second is the core's: **which file names count as a map**.
+//! That list used to live in this file. It is now `war3_map::is_map_file_name`, and the browser
+//! still reports "offered" rather than "valid" — see [`list_maps`] and the core function's own
+//! documentation for why those are different questions.
 
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
 use crate::settings::{self, GameDir};
-
-/// What a `.w3x`-shaped file is called on disk.
-///
-/// `.w3n` is a campaign, which the game can also load. The list is what the *browser* offers, not
-/// a claim about the format.
-const MAP_EXTENSIONS: [&str; 3] = ["w3x", "w3m", "w3n"];
 
 /// How deep the browser will walk.
 ///
@@ -142,7 +137,7 @@ fn walk(dir: &Path, name: &str, depth: usize, count: &mut usize) -> Result<MapDi
         };
         if meta.is_dir() {
             dirs.push((file_name, path));
-        } else if is_map_name(&file_name) {
+        } else if war3_map::is_map_file_name(&file_name) {
             files.push((file_name, path, meta.len()));
         }
     }
@@ -166,22 +161,6 @@ fn walk(dir: &Path, name: &str, depth: usize, count: &mut usize) -> Result<MapDi
         });
     }
     Ok(node)
-}
-
-/// Whether a filename is one the browser offers.
-///
-/// The extension is compared case-insensitively: installations in the wild contain both `.W3X`
-/// and `.w3x`, and a browser that showed only one of them would look broken.
-#[must_use]
-pub fn is_map_name(name: &str) -> bool {
-    Path::new(name)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| {
-            MAP_EXTENSIONS
-                .iter()
-                .any(|known| ext.eq_ignore_ascii_case(known))
-        })
 }
 
 /// Starts the game on a map.
@@ -246,17 +225,9 @@ pub struct Launch {
 mod tests {
     use super::*;
 
-    /// The extension test is what decides whether a file is *offered*, and it has to cope with
-    /// the case-instability of real installations.
-    #[test]
-    fn map_names_are_recognised_regardless_of_case() {
-        for name in ["a.w3x", "a.W3X", "a.W3m", "A.W3N", "(4)LostTemple.w3m"] {
-            assert!(is_map_name(name), "{name} should be offered");
-        }
-        for name in ["a.txt", "a.w3e", "a.w3i", "w3x", "a.w3x.bak", ".w3x"] {
-            assert!(!is_map_name(name), "{name} should not be offered");
-        }
-    }
+    // ⚠️ The extension test moved to the core with the function it tests:
+    // `war3_map::map::tests::map_file_names_are_recognised_regardless_of_case`. Testing it here
+    // would be testing a copy, which is the thing moving it was meant to end.
 
     /// Walking a real directory has to be stable: the same input, the same order.
     #[test]

@@ -33,8 +33,8 @@
 
 use crate::dto::{
     doodad_record, doodad_summary, object_category, unit_record, unit_summary, DiagnosticView,
-    DoodadView, MapSummary, ObjectView, SavePreview, TerrainInfo, TerrainView, UnitView,
-    DETAIL_LIMIT,
+    DoodadView, MapSummary, NameAnswer, NameQuery, ObjectView, SavePreview, TerrainInfo,
+    TerrainView, UnitView, DETAIL_LIMIT,
 };
 use war3_map::MapSource;
 
@@ -51,6 +51,10 @@ fn diagnostics_of(source: &war3_core::diag::Diagnostics) -> Vec<DiagnosticView> 
             severity: d.severity.to_string(),
             code: d.code.to_string(),
             message: d.message.clone(),
+            // Passed through so that no consumer has to *search* the message for the name. The
+            // editor did exactly that — `message.contains(member)` — which matches the wrong
+            // diagnostic whenever one member's name is a substring of another's.
+            subject: d.subject.clone(),
         })
         .collect()
 }
@@ -83,6 +87,16 @@ fn diagnostics_of(source: &war3_core::diag::Diagnostics) -> Vec<DiagnosticView> 
 pub fn open_map(path: String) -> Result<MapSummary, String> {
     let archive = war3_archive::Archive::open(&path).map_err(|e| e.to_string())?;
     let map = war3_map::Map::from_source(&archive).map_err(|e| e.to_string())?;
+    // ⚠️ The map's own object names are recorded here, from the archive that is already open, rather
+    // than being looked up when a panel asks. Two reasons, and the first is the important one:
+    //
+    // - A name lookup happens per table row and knows nothing about which map is open, so this is the
+    //   only place that knows both facts at once.
+    // - Opening an archive is the expensive step, and doing it again per lookup is what the name
+    //   engine exists to avoid.
+    //
+    // It cannot fail: a map with no object files (most of them) simply contributes no names.
+    crate::names::set_map(&archive);
     Ok(MapSummary::from_parse(&path, &archive, &map))
 }
 
@@ -387,6 +401,9 @@ pub fn read_objects(path: String) -> Result<ObjectView, String> {
                 severity: "error".to_string(),
                 code: "object.file".to_string(),
                 message: format!("{} failed to parse: {e}", kind.map_file()),
+                // The interface composes this one rather than the core, so it sets the subject too —
+                // otherwise the shape would be half-filled depending on where a diagnostic came from.
+                subject: Some(kind.map_file().to_string()),
             }),
         }
     }
@@ -400,24 +417,51 @@ pub fn read_objects(path: String) -> Result<ObjectView, String> {
 
 /// Why a `.doo` file's data is not available, preferring the core's own sentence.
 ///
-/// The core records "war3mapUnits.doo failed to parse; units skipped: ..." when the
-/// member exists but the record layout is one this build does not know, and that
-/// sentence is the difference between a user checking their map and a user assuming
-/// the feature is broken. Matching it by the file name is how `war3 map units` and
-/// `war3 map doodads` find it, and this reports the same sentence they do — the
-/// alternative, a second lookup, would let the panel and the command line give
-/// different reasons for one absence.
+/// The core records "war3mapUnits.doo failed to parse; units skipped: ..." when the member exists but
+/// the record layout is one this build does not know, and that sentence is the difference between a
+/// user checking their map and a user assuming the feature is broken. Matching it by the file name is
+/// how `war3 map units` and `war3 map doodads` find it, and this reports the same sentence they do —
+/// the alternative, a second lookup, would let the panel and the command line give different reasons
+/// for one absence.
 ///
-/// ⚠ The match is on a substring of a display message, which is a weak coupling. It
-/// is the same coupling the command line has, so the two agree; making it strong
-/// would mean a diagnostic that names its subject as a field rather than in prose,
-/// which is a change in the core. Writing that down here so the next reader knows the
-/// weakness was seen rather than missed.
+/// ⚠️ **The match is on the diagnostic's `subject` field where the core set one, and falls back to a
+/// substring of the message where it did not.** The previous version only ever searched the message,
+/// which is a weak coupling: a member whose name is a substring of another member's matches the wrong
+/// diagnostic, and the search silently keeps "working" when the core's wording changes.
+///
+/// The fallback stays because not every diagnostic carries a subject yet — the fields that name a
+/// member are converted as they come up — so both paths have to be right rather than one replacing
+/// the other. A caller cannot tell which path answered, which is why both return the same sentence.
 fn missing_reason(diagnostics: &[DiagnosticView], member: &str, fallback: &str) -> String {
     diagnostics
         .iter()
-        .find(|d| d.message.contains(member))
+        .find(|d| d.subject.as_deref() == Some(member))
+        .or_else(|| diagnostics.iter().find(|d| d.message.contains(member)))
         .map_or_else(|| fallback.to_string(), |d| d.message.clone())
+}
+
+/// Resolves object IDs to the names the game or the map gives them.
+///
+/// Batched, because the caller is a table: a unit view holds 121 records and asks about the IDs among
+/// them, and one round trip per ID would be 121 trips to answer one screen.
+///
+/// # Errors
+///
+/// Nothing. A missing game installation, an unknown ID and an object the game has never heard of all
+/// produce the same answer — the ID as its own name — so the interface needs no second code path and
+/// cannot fail to render a table because of a name.
+#[tauri::command]
+pub fn resolve_names(queries: Vec<NameQuery>) -> Vec<NameAnswer> {
+    crate::names::resolve(&queries)
+}
+
+/// How many object names the loaded engine knows, per kind.
+///
+/// Empty when no installation is configured, which is a state the settings screen reports rather
+/// than an error: the editor works without a game, showing IDs where names would be.
+#[tauri::command]
+pub fn name_stats() -> Vec<(String, usize)> {
+    crate::names::stats()
 }
 
 /// Reports the backend's own version, as a bridge smoke test.
@@ -472,6 +516,11 @@ pub fn settings_save(settings: SettingsView) -> Result<SettingsView, String> {
         }
     }
     crate::settings::save(&stored)?;
+    // ⚠️ The name engine is the one thing caching game data, and pointing the editor at another
+    // installation is the one thing that invalidates it. Without this the panels would keep showing
+    // the previous installation's names — and the symptom would be names in the wrong language, which
+    // reads as a bug in the name tables rather than as a stale cache.
+    crate::names::forget();
     Ok(settings_view(&stored))
 }
 
@@ -1239,9 +1288,21 @@ mod tests {
         );
         let entry = &category["customObjects"][0];
         assert_keys(entry, &["id", "baseId", "hero", "modifications", "shown"]);
+        // ⚠️ `fieldLabel`, `valueType` and `valueLabel` are the three that turn a column of ids into
+        // names. They were added together and this list is what caught the omission when they were not
+        // yet declared in `src/types.ts` — the runtime symptom would have been three silently blank
+        // cells, because a renamed or missing field arrives as `undefined`.
         assert_keys(
             &entry["shown"][0],
-            &["field", "value", "level", "dataIndicator"],
+            &[
+                "field",
+                "fieldLabel",
+                "valueType",
+                "value",
+                "valueLabel",
+                "level",
+                "dataIndicator",
+            ],
         );
     }
 

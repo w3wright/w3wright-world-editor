@@ -261,7 +261,7 @@ async function onDetect(): Promise<void> {
 }
 
 .settings-input:focus {
-  border-color: #2f6feb;
+  border-color: var(--accent);
   outline: 2px solid rgb(47 111 235 / 25%);
 }
 
@@ -285,13 +285,13 @@ async function onDetect(): Promise<void> {
 }
 
 .settings-btn.primary {
-  color: #fff;
-  background: #2f6feb;
-  border-color: #2f6feb;
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .settings-btn.primary:hover:not(:disabled) {
-  background: #2861d4;
+  background: var(--accent-hover);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -306,8 +306,8 @@ async function onDetect(): Promise<void> {
   }
 
   .settings-btn.primary {
-    background: #2f6feb;
-    border-color: #2f6feb;
+    background: var(--accent);
+    border-color: var(--accent);
   }
 }
 </style>

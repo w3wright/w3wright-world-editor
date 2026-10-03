@@ -236,13 +236,13 @@ const selectedName = computed(() => {
 }
 
 .maps-btn.primary {
-  color: #fff;
-  background: #2f6feb;
-  border-color: #2f6feb;
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .maps-btn.primary:hover:not(:disabled) {
-  background: #2861d4;
+  background: var(--accent-hover);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -270,8 +270,8 @@ const selectedName = computed(() => {
   }
 
   .maps-btn.primary {
-    background: #2f6feb;
-    border-color: #2f6feb;
+    background: var(--accent);
+    border-color: var(--accent);
   }
 }
 </style>

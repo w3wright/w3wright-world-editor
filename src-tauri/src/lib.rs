@@ -13,6 +13,7 @@
 mod commands;
 mod dto;
 mod game;
+mod names;
 mod settings;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -37,6 +38,8 @@ pub fn run() {
             commands::war3_check,
             commands::maps_list,
             commands::game_launch,
+            commands::resolve_names,
+            commands::name_stats,
             commands::backend_version
         ])
         .run(tauri::generate_context!())
