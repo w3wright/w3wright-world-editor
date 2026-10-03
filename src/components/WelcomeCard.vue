@@ -15,7 +15,9 @@
  * the keyboard-free route to it again later, and the read-only fact — which a user about to
  * point this at a map they care about is entitled to know before they click.
  */
-defineEmits<{ open: [] }>()
+import { game } from '../composables/useSettings'
+
+defineEmits<{ open: [], browse: [] }>()
 </script>
 
 <template>
@@ -24,9 +26,22 @@ defineEmits<{ open: [] }>()
       Open a Warcraft III map
     </h1>
 
-    <p class="m-0 mb-5 mt-4">
+    <p class="m-0 mb-5 mt-4 flex items-center gap-2.5">
       <button type="button" class="welcome-btn" @click="$emit('open')">
         Open a map…
+      </button>
+      <!--
+        Offered only when it would work. A second button that leads to "no game directory is set"
+        is worse than one button: at that point the user has to go and find Settings before
+        anything they clicked does anything.
+      -->
+      <button
+        v-if="game?.hasMaps"
+        type="button"
+        class="welcome-btn secondary"
+        @click="$emit('browse')"
+      >
+        Browse installed maps
       </button>
     </p>
 
@@ -82,6 +97,31 @@ defineEmits<{ open: [] }>()
 
 .welcome-btn:active {
   background: #2559bd;
+}
+
+/*
+ * The second way in, outlined rather than filled. Both buttons lead to a map, but one uses the
+ * system dialog and works anywhere while the other depends on a game being installed — so they
+ * are not two equal choices, and only the one that always works gets the fill.
+ */
+.welcome-btn.secondary {
+  color: inherit;
+  background: transparent;
+  border: 1px solid rgb(0 0 0 / 22%);
+}
+
+.welcome-btn.secondary:hover {
+  background: rgb(0 0 0 / 5%);
+}
+
+@media (prefers-color-scheme: dark) {
+  .welcome-btn.secondary {
+    border-color: rgb(255 255 255 / 26%);
+  }
+
+  .welcome-btn.secondary:hover {
+    background: rgb(255 255 255 / 8%);
+  }
 }
 
 .welcome-btn:focus-visible {

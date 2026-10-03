@@ -38,7 +38,21 @@ export interface NavAction {
   kind: 'action'
   label: string
   /** Matched by the component that dispatches it. */
-  id: 'open' | 'close'
+  id: 'open' | 'browse' | 'close' | 'play'
+  /**
+   * What has to be true for this entry to be usable.
+   *
+   * Declared here rather than worked out in `MenuBar`, because it is a fact about what the
+   * action *does* — `Close Map` needs a map open, launching needs a map **and** a game
+   * installation — and a component that guessed at it would be the second place the rule lives.
+   * An entry with nothing here is always usable.
+   */
+  requires?: {
+    /** A map has to be open. */
+    map?: boolean
+    /** A Warcraft III installation has to be configured. */
+    game?: boolean
+  }
 }
 
 export type NavEntry = NavScreen | NavAction
@@ -56,11 +70,23 @@ export interface NavCategory {
 /**
  * The menu, in the order `docs/03` §1.1 draws it.
  *
- * ⚠️ `File`, `Map` and `Objects` hold the six read-only views that exist, plus the two `File`
- * actions. `Edit` is the increment after this one — object data editing, which needs the save
- * loop the design set has verified but this app does not expose — and `Build` / `Help` arrive
- * with `war3-build` and a first-run document respectively. None of the three is stubbed, and
- * each says why on hover.
+ * ⚠️ `File`, `Map` and `Objects` hold the read-only views that exist, plus the `File` actions.
+ * `Edit` is the increment after this one — object data editing, which needs the save loop the
+ * design set has verified but this app does not expose — and `Build` / `Help` arrive with
+ * `war3-build` and a first-run document respectively. None of the three is stubbed, and each says
+ * why on hover.
+ *
+ * `File` holds three ways in, and they are three because they answer different questions:
+ * `Open Map…` is the system dialog and works for a map anywhere, `Browse Installed Maps…` skips
+ * the remembering of which folder the game keeps maps in, and `Settings…` is where the game
+ * directory those two need is set. Only the first works without a game installed, which is why
+ * it is first.
+ *
+ * ⚠️ **`Run` is its own category rather than an entry in `File`.** Launching is the one action
+ * here whose effect is *outside this window* — it starts another program — and putting it among
+ * two ways of opening a file, a way of closing one and a settings screen would have made `File`
+ * mean "everything". It sits next to `File` because it is the second thing a user reaches for
+ * after opening a map, and it is the only category whose entries are all actions.
  */
 export const NAV: NavCategory[] = [
   {
@@ -69,7 +95,17 @@ export const NAV: NavCategory[] = [
     why: '',
     entries: [
       { kind: 'action', label: 'Open Map…', id: 'open' },
-      { kind: 'action', label: 'Close Map', id: 'close' }
+      { kind: 'action', label: 'Browse Installed Maps…', id: 'browse' },
+      { kind: 'action', label: 'Close Map', id: 'close', requires: { map: true } },
+      { kind: 'screen', label: 'Settings', to: '/settings' }
+    ]
+  },
+  {
+    label: 'Run',
+    built: true,
+    why: '',
+    entries: [
+      { kind: 'action', label: 'Play in Warcraft III', id: 'play', requires: { map: true, game: true } }
     ]
   },
   {

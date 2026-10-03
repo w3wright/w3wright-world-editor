@@ -4,9 +4,16 @@
 //! [`dto`] built out of a core parse, and everything it can do goes through
 //! [`commands`] — see `docs/03` §1.1 for why that line is drawn here and not
 //! somewhere more convenient.
+//!
+//! [`settings`] and [`game`] are the two exceptions, and they are exceptions in kind rather than
+//! in spirit: where the game is installed and how to start it are questions about *this machine*,
+//! not about a map's bytes, so no core crate has an opinion to offer. Both modules say so at the
+//! top. Everything either of them learns about a **file** still comes from `crates/`.
 
 mod commands;
 mod dto;
+mod game;
+mod settings;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -24,6 +31,12 @@ pub fn run() {
             commands::read_units,
             commands::read_doodads,
             commands::read_objects,
+            commands::settings_get,
+            commands::settings_save,
+            commands::war3_status,
+            commands::war3_check,
+            commands::maps_list,
+            commands::game_launch,
             commands::backend_version
         ])
         .run(tauri::generate_context!())

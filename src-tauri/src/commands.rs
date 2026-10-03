@@ -473,6 +473,166 @@ pub fn backend_version() -> String {
     env!("CARGO_PKG_VERSION").to_owned()
 }
 
+/// Where the settings file lives and what is in it.
+///
+/// The path is returned even when nothing has been saved yet, because a user who wants the app
+/// to remember a game directory should be able to see *which file* would hold it — the whole
+/// point of keeping settings in `~/.w3wright` rather than a plugin's private store.
+///
+/// # Errors
+///
+/// When a settings file exists but cannot be parsed. A missing one is the defaults, and is not an
+/// error: the app has to start on a machine nothing has been configured on.
+#[tauri::command]
+pub fn settings_get() -> Result<SettingsView, String> {
+    let settings = crate::settings::load()?;
+    Ok(settings_view(&settings))
+}
+
+/// Writes the settings, after checking the game directory if one was given.
+///
+/// # Errors
+///
+/// When `war3_dir` is given and is not a Warcraft III installation, or when the file cannot be
+/// written. ⚠️ The check happens **here** rather than on read, so that a wrong path is reported
+/// while the user is looking at the box they typed it in. Checking on read instead would let the
+/// bad value be saved and only complain later, on a screen with no field to fix.
+#[tauri::command]
+pub fn settings_save(settings: SettingsView) -> Result<SettingsView, String> {
+    let mut stored = crate::settings::Settings::default();
+    let candidate = settings.war3_dir.map(|dir| dir.trim().to_string());
+    match candidate.as_deref() {
+        Some("") | None => {}
+        Some(dir) => {
+            crate::settings::check_war3_dir(dir)?;
+            stored.war3_dir = Some(dir.to_string());
+        }
+    }
+    crate::settings::save(&stored)?;
+    Ok(settings_view(&stored))
+}
+
+/// The game the app would use, and where that answer came from.
+///
+/// `game` is `None` when nothing was found — a state the interface must show as "set one", not as
+/// an error, since a machine without the game installed is a legitimate way to use a map editor.
+///
+/// # Errors
+///
+/// Only when the settings file itself is unreadable.
+#[tauri::command]
+pub fn war3_status() -> Result<StatusView, String> {
+    let settings = crate::settings::load()?;
+    Ok(status_view(&settings))
+}
+
+/// Checks one directory the user typed, without saving it.
+///
+/// Separate from [`settings_save`] so the interface can answer "is this the right folder?" as
+/// they type, rather than only on submit. It returns the same [`GameView`] a successful save
+/// would, so the panel shows one shape either way.
+///
+/// # Errors
+///
+/// When the directory is missing, is a file, or holds no `War3.exe`. The message names which.
+#[tauri::command]
+pub fn war3_check(dir: String) -> Result<GameView, String> {
+    let found = crate::settings::check_war3_dir(&dir)?;
+    Ok(game_view(&found))
+}
+
+/// Lists the maps installed under the game's `Maps` directory.
+///
+/// ⚠️ This reports what a **directory listing** offers, not what is a valid map. The extension
+/// filter is the game's, and the core has the final say when one is opened — deciding "this is a
+/// map" from a filename is exactly the second implementation of a format rule that `docs/03` §1.1
+/// forbids.
+///
+/// # Errors
+///
+/// When no installation can be found, or when `Maps` cannot be read.
+#[tauri::command]
+pub fn maps_list() -> Result<crate::game::MapBrowser, String> {
+    crate::game::list_maps()
+}
+
+/// Starts the game on one map.
+///
+/// Returns the process id rather than nothing, so the interface can say what happened. A command
+/// that returns `Ok(())` after spawning leaves the panel with no way to distinguish "started" from
+/// "the click did nothing".
+///
+/// # Errors
+///
+/// When no installation is found, when the map is gone, or when the game cannot be started.
+#[tauri::command]
+pub fn game_launch(map: String) -> Result<crate::game::Launch, String> {
+    crate::game::launch(&map)
+}
+
+/// The settings as the interface sees them.
+fn settings_view(settings: &crate::settings::Settings) -> SettingsView {
+    SettingsView {
+        war3_dir: settings.war3_dir.clone(),
+        path: crate::settings::file_path().map(|p| p.display().to_string()),
+    }
+}
+
+/// A game installation as the interface sees it.
+fn game_view(found: &crate::settings::GameDir) -> GameView {
+    GameView {
+        dir: found.dir.clone(),
+        exe: found.exe.clone(),
+        // The core's own words for where it came from, passed through rather than reworded: the
+        // three sources mean different things to a reader, and inventing a friendlier synonym
+        // here would be a second vocabulary for the same fact.
+        source: found.source.clone(),
+        has_maps: found.has_maps,
+    }
+}
+
+/// The game's state as the interface sees it.
+fn status_view(settings: &crate::settings::Settings) -> StatusView {
+    StatusView {
+        game: crate::settings::find_game(settings).as_ref().map(game_view),
+        settings_path: crate::settings::file_path().map(|p| p.display().to_string()),
+    }
+}
+
+/// What `settings_get` and `settings_save` return.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsView {
+    /// The configured game directory, if there is one.
+    pub war3_dir: Option<String>,
+    /// Where the settings are stored; `None` when the home directory could not be found.
+    pub path: Option<String>,
+}
+
+/// What `war3_status` returns.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusView {
+    /// The installation the app would use, if any was found.
+    pub game: Option<GameView>,
+    /// Where the settings are stored.
+    pub settings_path: Option<String>,
+}
+
+/// One game installation.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameView {
+    /// The installation directory.
+    pub dir: String,
+    /// The executable inside it.
+    pub exe: String,
+    /// `configured`, `registry` or `common` — where the directory was found.
+    pub source: String,
+    /// Whether it has a `Maps` directory for the browser to show.
+    pub has_maps: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

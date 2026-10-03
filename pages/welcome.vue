@@ -7,9 +7,9 @@
  */
 import WelcomeCard from '~/components/WelcomeCard.vue'
 
-defineEmits<{ open: [] }>()
+defineEmits<{ open: [], browse: [] }>()
 </script>
 
 <template>
-  <WelcomeCard @open="$emit('open')" />
+  <WelcomeCard @open="$emit('open')" @browse="$emit('browse')" />
 </template>

@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { busy, error, summary } from '../composables/useOpenMap'
-import { close, maximized, minimize, toggleMaximize, useWindowState } from '../composables/useWindow'
 /**
  * The window's own title bar.
  *
@@ -17,7 +15,15 @@ import { close, maximized, minimize, toggleMaximize, useWindowState } from '../c
  * ⚠️ No map knowledge. It shows the *name* of the open map because the shell already has
  * it, and nothing here inspects a path or decides what a file is. That line is `docs/03`
  * §1.1's, and it applies to the chrome as much as to the panels.
+ *
+ * ⚠️ **No commands either.** A `▶ Play` button lived here and has moved to the `Run` menu. This
+ * bar's job is the window: the drag region, the map's name, whether a command is running, and
+ * the three controls. Starting another program is none of those, and having it here made the
+ * bar two things at once — chrome *and* the only command outside the menu bar. Everything the
+ * app does is now in the menu bar, which is the one place a reader looks.
  */
+import { busy, error, summary } from '../composables/useOpenMap'
+import { close, maximized, minimize, toggleMaximize, useWindowState } from '../composables/useWindow'
 import { fileName } from '../format'
 
 useWindowState()

@@ -30,8 +30,10 @@ import { useRoute } from 'vue-router'
 import { closeMenu, isCurrentRoute, NAV, openMenu, toggleMenu } from '../nav'
 
 const props = defineProps<{
-  /** Whether a map is open, so `Close Map` can be disabled rather than fail. */
+  /** Whether a map is open, so entries that need one can be disabled rather than fail. */
   hasMap: boolean
+  /** Whether a game installation is configured, for the same reason. */
+  hasGame: boolean
 }>()
 
 const emit = defineEmits<{
@@ -48,9 +50,30 @@ const buttons = ref<Record<string, HTMLButtonElement | null>>({})
 /** The popup, so focus can move into it when it opens. */
 const popup = ref<HTMLElement | null>(null)
 
+/**
+ * How far from the bar's left edge the popup sits.
+ *
+ * ⚠️ The popup used to be anchored at a fixed `left: 0.375rem`, which was invisible while `File`
+ * was the only category with entries — it happened to be the first button. Adding a second
+ * category with a menu put `Run`'s popup under `File`, several labels away from the button that
+ * opened it, which reads as the wrong menu rather than as a misplaced one.
+ *
+ * Measured from the button rather than derived from the category's index: the labels are
+ * different widths ("File" against "Objects"), so an index would drift. The offset is set on the
+ * popup and read back by CSS as `left`, which keeps the anchoring in one place.
+ */
+const popupLeft = ref('0.375rem')
+
 watch(openMenu, (label) => {
-  if (label)
-    void nextTick(() => popup.value?.querySelector<HTMLElement>('.menu-item')?.focus())
+  if (!label) {
+    return
+  }
+  const button = buttons.value[label]
+  const bar = button?.parentElement
+  // `offsetLeft` is relative to the bar, which is the popup's own offset parent — the bar is
+  // `position: relative`, so no coordinate conversion is needed here.
+  popupLeft.value = button && bar ? `${button.offsetLeft}px` : '0.375rem'
+  void nextTick(() => popup.value?.querySelector<HTMLElement>('.menu-item')?.focus())
 })
 
 /** The entries of the open menu. */
@@ -76,12 +99,52 @@ function onAction(entry: NavAction): void {
   emit('action', entry.id)
 }
 
-/** `Close Map` has nothing to do without a map, so it says so instead of failing. */
+/**
+ * Whether an entry cannot be used yet.
+ *
+ * Driven by the entry's own declaration rather than by its id, so adding an action that needs a
+ * map does not mean adding a branch here. A screen is always somewhere to go.
+ */
 function isDisabled(entry: NavEntry): boolean {
-  // Only actions can be disabled today; a screen is always somewhere to go.
-  if (entry.kind !== 'action')
+  if (entry.kind !== 'action' || !entry.requires)
     return false
-  return entry.id === 'close' && !props.hasMap
+  if (entry.requires.map && !props.hasMap)
+    return true
+  return Boolean(entry.requires.game && !props.hasGame)
+}
+
+/**
+ * Why an entry is disabled, in the words a user needs.
+ *
+ * ⚠️ Two different missing things must not read as one. "No map is open" sends a user to the
+ * File menu; "no game installation is set" sends them to Settings, and an entry greyed out with
+ * the wrong reason is worse than no tooltip at all.
+ */
+function disabledReason(entry: NavEntry): string {
+  if (entry.kind !== 'action' || !entry.requires)
+    return entry.label
+  if (entry.requires.map && !props.hasMap)
+    return 'Open a map first'
+  if (entry.requires.game && !props.hasGame)
+    return 'No Warcraft III installation is set — see File ▸ Settings'
+  return entry.label
+}
+
+/**
+ * The reason the menu's first disabled row gives, or `null` when nothing is disabled.
+ *
+ * Used to repeat that reason as text at the bottom of the menu.
+ *
+ * ⚠️ A tooltip does not reach a keyboard user: a disabled button cannot be focused, so the only
+ * place the reason appears is on hover, which is mouse-only. That is the gap this fills — and it
+ * is deliberately **generic** rather than a "no game" special case. A special case was tried
+ * first and could not fire: `Play` requires a map as well, so it reports "open a map first" and
+ * the game line would have printed a second, contradictory reason beside it.
+ */
+function disabledNote(): string | null {
+  const shown = entries()
+  const first = shown.find(entry => isDisabled(entry))
+  return first ? disabledReason(first) : null
 }
 
 /** Whether the route on display is this screen. */
@@ -128,6 +191,7 @@ function current(to: NavScreen['to']): boolean {
         class="menu-popup z-50"
         role="menu"
         :aria-label="openMenu"
+        :style="{ left: popupLeft }"
         @keydown.esc="onEscape(openMenu)"
       >
         <button
@@ -137,7 +201,7 @@ function current(to: NavScreen['to']): boolean {
           role="menuitem"
           class="menu-item"
           :disabled="isDisabled(entry)"
-          :title="isDisabled(entry) ? 'No map is open' : entry.label"
+          :title="disabledReason(entry)"
           @click="entry.kind === 'action' ? onAction(entry) : onScreen(entry)"
         >
           <span>{{ entry.label }}</span>
@@ -156,6 +220,13 @@ function current(to: NavScreen['to']): boolean {
         <p v-if="entries().length === 0" class="menu-empty">
           Nothing here yet.
         </p>
+        <!--
+          The reason a row above is greyed out, in text. See `disabledNote` for why this is here
+          as well as in the row's tooltip.
+        -->
+        <p v-else-if="disabledNote()" class="menu-note">
+          {{ disabledNote() }}
+        </p>
       </div>
     </template>
   </nav>
@@ -166,11 +237,13 @@ function current(to: NavScreen['to']): boolean {
  * The menu's rows and elevation, kept in CSS because it is a layer with its own anchoring
  * and per-state rows. `position: absolute` against the `relative` bar, so the popup floats
  * over the screen without pushing the layout; the inline `z-40`/`z-50` put it above the
- * panel. It is anchored to the bar rather than to the category button on purpose: a
- * per-button offset would have to be measured, and the popup would jump as labels change
- * width.
+ * panel.
  *
- * ⚠️ The opaque surface is **not** here. It cannot be a utility: UnoCSS's `dark:` variant
+ * ⚠️ `left` is **not** set here. It comes from the component as an inline style, measured from
+ * the category button that opened the menu — see `popupLeft`. A fixed value here would put every
+ * menu under the first category.
+ *
+ * ⚠️ The opaque surface is **not** here either. It cannot be a utility: UnoCSS's `dark:` variant
  * compiles to a `.dark` ancestor class, and this app follows the system scheme instead (see
  * `base.css`), so `dark:bg-…` matches nothing and the popup stayed white on a dark window —
  * unreadable text on white, which is how it was caught. The surface lives in `base.css` with
@@ -179,7 +252,6 @@ function current(to: NavScreen['to']): boolean {
 .menu-popup {
   position: absolute;
   top: 100%;
-  left: 0.375rem;
   min-width: 13rem;
   padding: 0.25rem;
   border: 1px solid rgb(128 128 128 / 0.35);
@@ -216,6 +288,33 @@ function current(to: NavScreen['to']): boolean {
 
 .menu-tick {
   opacity: 0.7;
+}
+
+/*
+ * The two lines a menu can end with: "nothing here" for a category with no entries, and the
+ * reason a row above is greyed out.
+ *
+ * ⚠️ `.menu-empty` had no rule at all until this was written — it rendered as body text with the
+ * page's margins inside a popup. That is the failure mode a class name invites: it looks
+ * deliberate in the template and is invisible until someone opens the menu and reads it.
+ *
+ * The note is bounded in width because it is a sentence, not a label, and an unbounded one would
+ * widen the popup to the width of the text.
+ */
+.menu-empty,
+.menu-note {
+  max-width: 15rem;
+  margin: 0;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  opacity: 0.6;
+}
+
+.menu-note {
+  margin-top: 0.2rem;
+  border-top: 1px solid rgb(128 128 128 / 0.25);
+  padding-top: 0.35rem;
 }
 
 /* Chrome hides the marker, because an open menu is shown by the popup and a screen's

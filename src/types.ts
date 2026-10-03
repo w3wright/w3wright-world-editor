@@ -41,6 +41,77 @@ export interface RichText {
   segments: RichSegment[]
 }
 
+/**
+ * The user's settings.
+ *
+ * ⚠️ Not map data and not format data: where the game is installed is a fact about this machine.
+ * It lives in `~/.w3wright/settings.json` rather than in a plugin's private store, so that a text
+ * editor is a second way to change it — and so a future command-line tool can read the same file.
+ */
+export interface SettingsView {
+  /** The configured game directory, or `null`. */
+  war3Dir: string | null
+  /** Where the settings file is, so a panel can say which file it would write. */
+  path: string | null
+}
+
+/**
+ * A game installation.
+ *
+ * `source` is `configured`, `registry` or `common` — the backend's own words, passed through
+ * rather than reworded: a path the user chose and a path the app guessed are not the same fact,
+ * and inventing a friendlier synonym here would be a second vocabulary for it.
+ */
+export interface GameView {
+  dir: string
+  exe: string
+  source: string
+  /** Whether it has a `Maps` directory for the browser to show. */
+  hasMaps: boolean
+}
+
+/** The game the app would use, and where the settings live. */
+export interface StatusView {
+  game: GameView | null
+  settingsPath: string | null
+}
+
+/** One entry the map browser offers. */
+export interface MapEntry {
+  name: string
+  path: string
+  kind: string
+  size: number | null
+}
+
+/** One directory in the map browser, with everything under it. */
+export interface MapDir {
+  name: string
+  path: string
+  dirs: MapDir[]
+  files: MapEntry[]
+}
+
+/**
+ * What the map browser was given.
+ *
+ * ⚠️ `tree` is a **directory listing**, not a claim about what is a map. The extension filter is
+ * the game's; the core decides what is really a map when one is opened, and says so if it is not.
+ */
+export interface MapBrowser {
+  gameDir: string
+  mapsDir: string | null
+  tree: MapDir | null
+  mapCount: number
+}
+
+/** What starting the game produced. */
+export interface Launch {
+  pid: number
+  exe: string
+  map: string
+}
+
 /** One archive member. */
 export interface Member {
   name: string

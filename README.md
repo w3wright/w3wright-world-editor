@@ -29,11 +29,11 @@ and there is no game-directory setting.
 
 `decorations: false` in `src-tauri/tauri.conf.json` removes the native title bar, so the
 app draws it: the drag region, the window controls, and a menu bar whose categories **pop
-out** over the window. Maps are opened through the system file picker, not by typing a path
-— with no native menu there is nowhere for a stray text box to live, and a dialog cannot
-produce a typo.
+out** over the window. Maps are opened through the system file picker or the installed-map
+browser, not by typing a path — with no native menu there is nowhere for a stray text box to
+live, and a dialog cannot produce a typo.
 
-⚠️ Three things about this are not obvious and each cost real debugging time; they are
+⚠️ Four things about this are not obvious and each cost real debugging time; they are
 written down where the next person will look. The short version:
 
 - `window.toggleMaximize()` needs `core:window:allow-toggle-maximize` — it is not
@@ -44,6 +44,10 @@ written down where the next person will look. The short version:
   sets — it follows the system scheme with `prefers-color-scheme`. So `dark:bg-…` matches
   nothing, and the menu popup was white-on-white in a dark window until its surface moved
   into [`base.css`](src/styles/base.css). Use that media query, not the variant.
+- The popup's `left` is **measured from the category button that opened it**, not fixed in
+  CSS. It was `left: 0.375rem` and looked right while `File` was the only category with
+  entries — it happened to be the first button. The moment `Run` got a menu, its popup
+  appeared under `File`, which reads as the wrong menu rather than a misplaced one.
 
 The menu is one table in [`src/nav.ts`](src/nav.ts), and it is the **whole** of the app's
 navigation — there is no sidebar, so `File ▸ Open Map…` and `Map ▸ Terrain` are the only way
@@ -102,6 +106,61 @@ types" would be free to disagree about a map without anyone noticing which was r
 distinct unit types. The DTO carries the full histogram as well as the ranked head, so
 the panel can say "the 12 commonest of 22" instead of presenting a head as the whole.
 
+## Where the game is, and what that buys
+
+`~/.w3wright/settings.json` holds one thing so far:
+
+```json
+{
+  "war3Dir": "D:\\Warcraft3"
+}
+```
+
+It is a plain file in the home directory rather than a plugin's private store, because two
+readers want it and only one of them is the app: a user who wants to point the editor at another
+installation should be able to edit it in a text editor, and a future command-line tool needs the
+same answer without going through a webview.
+
+Two features need that directory, and `File ▸ Settings` is where it is set:
+
+- **`Run ▸ Play in Warcraft III`** starts the game on the open map, via
+  `War3.exe -loadfile <map>` with the working directory set to the installation. ⚠️ The working
+  directory matters: the game resolves `war3.mpq` and `War3Patch.mpq` relative to itself, so
+  launching it with an inherited one is how "the game starts and cannot find its own data"
+  happens. The entry is disabled until a map is open **and** a game is configured, and its
+  tooltip says which of the two is missing — those send a user to two different places.
+- **`File ▸ Browse Installed Maps…`** shows everything under `<war3Dir>/Maps` as a tree, so a map
+  can be picked without a file dialog. The dialog opens wherever it was last used and leaves the
+  user to remember whether a map is in `Maps`, `Maps\Download` or `Maps\FrozenThrone\Scenario`;
+  this shows the whole structure at once. Each folder starts collapsed and shows how many maps are
+  inside it.
+
+⚠️ **Everything the app does is in the menu bar.** A `▶ Play` button lived in the title bar for
+one increment and was moved here: that bar's job is the window — the drag region, the map's name,
+whether a command is running, and the three controls — and starting another program is none of
+those. Having it there also made the bar two things at once, chrome *and* the only command
+outside the menu.
+
+`Run` is its own category rather than an entry in `File`, because launching is the one action
+whose effect is **outside this window**. Putting it among two ways of opening a file, a way of
+closing one and a settings screen would have made `File` mean "everything".
+
+⚠️ **The browser offers, it does not validate.** Its extension filter is the game's, and the core
+decides what is really a map when one is opened — a file that is not a map is rejected there,
+with the reason on screen. Deciding "this is a valid map" from a filename would be the second
+implementation of a format rule that `docs/03` §1.1 forbids.
+
+The installation is found in this order: what the user configured, then `InstallPath` in
+`HKLM\SOFTWARE\WOW6432Node\Blizzard Entertainment\Warcraft III`, then a handful of conventional
+directories. The three are reported as `configured`, `registry` or `common` rather than collapsed
+into "found", because a path the user chose and a path the app guessed are not the same fact.
+
+⚠️ A configured path is **never silently replaced** by a detected one. If the user's path does not
+hold `War3.exe`, the panel says which of the three things is wrong with it — missing, a file, or a
+directory without the game — instead of quietly using a different installation. The check runs on
+**save**, not on read, so a wrong path is reported while the box it was typed into is still on
+screen.
+
 ## Layout
 
 ```text
@@ -112,11 +171,15 @@ w3wright-world-editor/
 ├── pages/                # one file per screen; the route table is generated from it
 ├── src/                  # Vue 3 + TypeScript front end
 │   ├── nav.ts            # the menu: the one table behind the menu bar, and the navigation
-│   ├── types.ts          # mirrors src-tauri/src/dto.rs by hand
+│   ├── types.ts          # mirrors src-tauri/src/dto.rs and the command DTOs by hand
 │   ├── format.ts         # byte sizes, file names
+│   ├── colour.ts         # map text colours, solved for WCAG AA against the current surface
 │   ├── components/       # the shell (TitleBar, MenuBar) and one panel per view
-│   └── composables/      # useOpenMap (the open map, shared) and useWindow (its controls)
+│   └── composables/      # useOpenMap (the open map), useSettings (the game), useWindow
 ├── src-tauri/            # the Rust app: Tauri config, commands, DTOs (see its README)
+│   ├── src/dto.rs        # the read-only views' shapes
+│   ├── src/settings.rs   # ~/.w3wright/settings.json, and finding the game
+│   └── src/game.rs       # the Maps tree, and starting the game
 └── package.json
 ```
 
