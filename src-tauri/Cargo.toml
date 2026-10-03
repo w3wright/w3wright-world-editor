@@ -62,29 +62,35 @@ serde_json = "1"
 # arrive with the feature that needs them — `war3-project` for extract/build,
 # `war3-object` for the object editor.
 #
-# ⚠️ `war3-map` is published as `0.0.2` while the local checkout is `0.0.3`, so a
-# **release build cannot resolve it yet**: Cargo treats `0.0.x` as exact, and
-# `"0.0.3"` is not satisfied by `0.0.2`. Publishing `0.0.3` is the fix; see the
-# README's release checklist.
+# ⚠️ **Every `war3-*` requirement here is `0.0.5`, and only four of the eight can be
+# resolved from crates.io today**: `war3-core`, `war3-archive`, `war3-terrain` and
+# `war3-meta` are published at `0.0.5`, while `war3-map` is still at `0.0.2` and
+# `war3-game`, `war3-object` and `war3-project` have never been published at all. So a
+# release build cannot resolve this today: Cargo treats `0.0.x` as exact, and nothing but
+# the local patch can satisfy `"0.0.5"` for the four that are missing. Publishing `0.0.5`
+# for the rest is the fix; see the README's release checklist. ⚠️ This note used to be a
+# version-mismatch example ("`war3-map` is `0.0.2` while the local checkout is `0.0.3`");
+# the gap has since widened to four published, one stale and three never-published
+# crates, which is why the wording is now a list rather than one example.
 # ⚠️ Two crates, not one, and the reason is a real trap: `Map::files` is **not** the
 # archive's member list. It is the intersection of the archive with a hardcoded
 # `KNOWN_MEMBER_NAMES` probe list, so a member outside that list — a minimap
 # `war3mapMap.blp`, any imported asset — is absent from it without any diagnostic.
 # Building a member list from `Map::files` silently shows fewer files than the map
 # has. `war3-archive` is what enumerates the real members.
-war3-archive = "0.0.3"
-war3-map = "0.0.3"
+war3-archive = "0.0.5"
+war3-map = "0.0.5"
 # `war3-core` is needed for `Diagnostics` — the type the core's classifier fills in,
 # and the type this crate must name to call it.
-war3-core = "0.0.3"
+war3-core = "0.0.5"
 # `war3-project` decides a member's **disposition** ("textified", "kept as binary",
 # "kept as its stored block"). The Explorer shows that per member, and the answer must
 # come from here rather than be re-derived in the interface: `extract` acts on the very
 # same function, so a screen claiming "textified" while extraction wrote binary is
 # impossible by construction.
-war3-project = "0.0.3"
+war3-project = "0.0.5"
 # The terrain view reads `.w3e` directly; it is no longer only a transitive dependency.
-war3-terrain = "0.0.3"
+war3-terrain = "0.0.5"
 # The object view reads the seven `war3map.w3*` object files. ⚠️ `war3-object` is
 # **not published to crates.io yet**, so a release build cannot resolve it — the
 # local `[patch]` is what makes this line work today. See the README's release
@@ -92,7 +98,7 @@ war3-terrain = "0.0.3"
 #
 # `war3-meta` comes with it transitively (`ObjectKind` is re-exported from there),
 # and it is likewise unpublished, so it is in the patch list too.
-war3-object = "0.0.3"
+war3-object = "0.0.5"
 # Object names, and the game installation's data behind them. ⚠️ **Not published to
 # crates.io yet**, so a release build cannot resolve it either — the local `[patch]` is
 # what makes this line work today, and publishing it is part of the change that needs it.
@@ -102,9 +108,9 @@ war3-object = "0.0.3"
 # friends, and it holds the archive load order that decides which copy of a table wins.
 # Nothing of that belongs here — a second implementation of it in the interface is exactly
 # what `docs/03` §1.1 forbids.
-war3-game = { version = "0.0.3", features = [ "mpq" ] }
+war3-game = { version = "0.0.5", features = [ "mpq" ] }
 # ⚠️ Named directly because this crate passes `ObjectKind` to `war3-game`'s resolver rather
 # than reaching it through `war3-object`'s re-export. A re-export is for callers that already
 # depend on the crate doing the re-exporting, and this one does not need `war3-object` for
 # anything in `names.rs`.
-war3-meta = "0.0.3"
+war3-meta = "0.0.5"

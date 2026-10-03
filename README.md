@@ -225,22 +225,26 @@ published artefact cannot carry a filesystem path into someone else's build.
 
 | Crate | crates.io | local | used here |
 | --- | --- | --- | --- |
-| `war3-map` | `0.0.2` | `0.0.3` | the map model |
-| `war3-archive` | `0.0.2` | `0.0.3` | the real member list |
-| `war3-core`, `war3-terrain` | `0.0.2` | `0.0.3` | transitively |
-| `war3-project` | **not published** | `0.0.3` | member dispositions |
-| `war3-object` | **not published** | `0.0.3` | the object view |
-| `war3-meta` | **not published** | `0.0.3` | transitively, through `war3-object` |
+| `war3-core` | `0.0.5` | `0.0.5` | transitively |
+| `war3-archive` | `0.0.5` | `0.0.5` | the real member list |
+| `war3-terrain` | `0.0.5` | `0.0.5` | the terrain view |
+| `war3-meta` | `0.0.5` | `0.0.5` | transitively, through `war3-object` |
+| `war3-map` | `0.0.2` | `0.0.5` | the map model |
+| `war3-game` | **not published** | `0.0.5` | the game's own data and the name resolver |
+| `war3-object` | **not published** | `0.0.5` | the object view |
+| `war3-project` | **not published** | `0.0.5` | member dispositions |
 
 Only the crates actually used are declared. Seven went in when this app was
 scaffolded and it used none of them, which is a compile cost and a claim about the
 design that was not true.
 
 **The blocker is the version, not the missing crates.** Cargo treats `0.0.x` as
-exact, so a requirement of `"0.0.3"` is **not** satisfied by a published `0.0.2`.
-Until `0.0.3` is published, only a build with the local patch works — and for
-`war3-object` and `war3-meta` **nothing** is published at all, so the object view has
-no release path whatsoever yet. See the release checklist.
+exact, so a requirement of `"0.0.5"` is **not** satisfied by a published `0.0.2`.
+Four of the eight are published at `0.0.5` and resolve from crates.io on their own;
+`war3-map` is still two versions behind, and `war3-game`, `war3-object` and
+`war3-project` have **nothing** published at all, so those features have no release
+path whatsoever yet. Today only a build with the local patch works. See the release
+checklist.
 
 ⚠️ A transitive crate has to be patched too, even when no code here names it.
 `war3-object` depends on `war3-meta` by version, so leaving `war3-meta` out of
