@@ -10,6 +10,7 @@ import type { MapSummary } from '../types'
 import { computed } from 'vue'
 import { badgeVars } from '../badges'
 import { formatBytes, formatFlags } from '../format'
+import StyledText from './StyledText.vue'
 
 const props = defineProps<{ summary: MapSummary }>()
 
@@ -53,7 +54,7 @@ function badgeStyle(disposition: string): Record<string, string> {
   <section class="page-body">
     <header>
       <h1 class="page-title">
-        {{ summary.name || "(unnamed map)" }}
+        <StyledText :text="summary.nameRich" fallback="(unnamed map)" />
       </h1>
       <p class="page-path">
         {{ summary.path }}
@@ -65,14 +66,23 @@ function badgeStyle(disposition: string): Record<string, string> {
         author
       </dt>
       <dd class="field-value">
-        {{ summary.author || "—" }}
+        <StyledText :text="summary.authorRich" />
       </dd>
 
       <dt class="field-term">
         players
       </dt>
       <dd class="field-value">
-        {{ summary.recommendedPlayers || "—" }}
+        <!-- The cast is what happens when a field can be absent: `recommendedPlayers` is `None`
+             for a format version with no such field, and the plain form is the one that carries
+             that `null`. A present-but-uncoloured value renders through the same path. -->
+        <StyledText
+          v-if="summary.recommendedPlayersRich"
+          :text="summary.recommendedPlayersRich"
+        />
+        <template v-else>
+          —
+        </template>
       </dd>
 
       <dt class="field-term">
@@ -122,8 +132,10 @@ function badgeStyle(disposition: string): Record<string, string> {
       <h2 class="section-head">
         description
       </h2>
-      <p class="m-0 whitespace-pre-wrap text-0.9rem">
-        {{ summary.description }}
+      <!-- The author's line breaks are kept, and so are the author's colours: a description is
+           written to be read, and the two together are what they wrote. -->
+      <p class="m-0 text-0.9rem">
+        <StyledText :text="summary.descriptionRich" multiline />
       </p>
     </template>
 

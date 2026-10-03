@@ -18,12 +18,28 @@ crate-type = [
   "rlib"
 ]
 
+[features]
+# `tauri build` turns this on; `tauri dev` leaves it off and loads `devUrl` instead.
+#
+# It is declared here rather than left to Tauri's CLI so that a plain `cargo build
+# --features custom-protocol` produces the same binary a bundle would: the built front end
+# is embedded and served from the asset layer, with no dev server involved. That is the only
+# way to exercise the real window — the packaged capability set, the embedded assets, the
+# plugin permissions — without a full release build.
+default = []
+custom-protocol = [ "tauri/custom-protocol" ]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+# The open dialog. ⚠️ This is not cosmetic: a path typed by hand cannot be pasted into a
+# window with no native title bar and no menu, and the file dialog is the only way to
+# reach a map that the user has not memorised the location of. It is a whole plugin
+# rather than a call into `tauri` because the platform file pickers (`rfd`) live here.
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = [ "derive" ] }
 serde_json = "1"
 
@@ -69,3 +85,11 @@ war3-core = "0.0.3"
 war3-project = "0.0.3"
 # The terrain view reads `.w3e` directly; it is no longer only a transitive dependency.
 war3-terrain = "0.0.3"
+# The object view reads the seven `war3map.w3*` object files. ⚠️ `war3-object` is
+# **not published to crates.io yet**, so a release build cannot resolve it — the
+# local `[patch]` is what makes this line work today. See the README's release
+# checklist; publishing it is part of the change that needs it.
+#
+# `war3-meta` comes with it transitively (`ObjectKind` is re-exported from there),
+# and it is likewise unpublished, so it is in the patch list too.
+war3-object = "0.0.3"

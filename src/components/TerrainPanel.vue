@@ -173,7 +173,7 @@ function barWidth(share: number): string {
       <p v-if="layers.length === 0" class="m-0 text-0.85rem opacity-60">
         no tile points use a layer
       </p>
-      <table v-else class="layers">
+      <table v-else class="data-table max-w-42rem">
         <thead>
           <tr>
             <th>idx</th>
@@ -258,46 +258,3 @@ function barWidth(share: number): string {
     </template>
   </section>
 </template>
-
-<style scoped>
-/*
- * The histogram table, kept in CSS for reasons utilities cannot cover: a collapsed
- * border model with a per-cell top rule — the usual way to render a dense numeric table
- * without a border on every side — and a bar whose width arrives as an inline style,
- * because the width is data rather than a style choice.
- */
-.layers {
-  border-collapse: collapse;
-  font-size: 0.85rem;
-  width: 100%;
-  max-width: 42rem;
-}
-
-.layers th {
-  text-align: left;
-  font-weight: 500;
-  opacity: 0.6;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 0.2rem 0.5rem;
-}
-
-.layers td {
-  padding: 0.15rem 0.5rem;
-  border-top: 1px solid rgb(128 128 128 / 0.15);
-}
-
-/*
- * Makes a 0.1% difference visible where the number alone hides it. `currentColor` so the
- * bar follows the text colour, including under a high-contrast theme.
- */
-.bar {
-  display: block;
-  height: 0.7rem;
-  background: currentColor;
-  opacity: 0.35;
-  border-radius: 2px;
-  min-width: 1px;
-}
-</style>

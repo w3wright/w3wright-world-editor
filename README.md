@@ -15,15 +15,92 @@ crates.io" stay the same question.
 
 ## Status
 
-Phase 4 of the design set — the app shell and the first real panel. It opens a
-window, calls Rust, and shows a map's name, author, description, members and
-diagnostics. No 3D viewport and no WebGPU yet; those are Phase 5, and the WebGPU
-smoke test in ADR-0008 is the first task of that phase, not this one.
+Phase 4 of the design set — the app shell and the read-only views. It opens a window,
+calls Rust, and shows a map's name, author, description, members, diagnostics, its
+terrain, its placed units and doodads, and its object data. No 3D viewport and no
+WebGPU yet; those are Phase 5, and the WebGPU smoke test in ADR-0008 is the first task
+of that phase, not this one.
 
-What the first panel does **not** do yet: pick a file through a dialog (the path is
-typed), edit anything, or show object data. Editing is the increment that turns this
-from a viewer into an editor, and it needs the save loop to be verified against the
-engine first.
+What these panels do **not** do yet: edit anything, show a doodad or unit in 3D, or
+resolve object field ids to names — the last needs the game's `*MetaData.slk` tables,
+and there is no game-directory setting.
+
+## The window draws its own chrome
+
+`decorations: false` in `src-tauri/tauri.conf.json` removes the native title bar, so the
+app draws it: the drag region, the window controls, and a menu bar whose categories **pop
+out** over the window. Maps are opened through the system file picker, not by typing a path
+— with no native menu there is nowhere for a stray text box to live, and a dialog cannot
+produce a typo.
+
+⚠️ Three things about this are not obvious and each cost real debugging time; they are
+written down where the next person will look. The short version:
+
+- `window.toggleMaximize()` needs `core:window:allow-toggle-maximize` — it is not
+  `maximize` + `unmaximize`. See [`src-tauri/README.md`](src-tauri/README.md).
+- The capability must use `"windows": ["*"]`; `["main"]` resolves to an empty window set and
+  denies every command. Same file.
+- UnoCSS's `dark:` variant compiles to a `.dark` **ancestor class**, which this app never
+  sets — it follows the system scheme with `prefers-color-scheme`. So `dark:bg-…` matches
+  nothing, and the menu popup was white-on-white in a dark window until its surface moved
+  into [`base.css`](src/styles/base.css). Use that media query, not the variant.
+
+The menu is one table in [`src/nav.ts`](src/nav.ts), and it is the **whole** of the app's
+navigation — there is no sidebar, so `File ▸ Open Map…` and `Map ▸ Terrain` are the only way
+from one screen to another. `Edit`, `Build` and `Help` are listed and disabled, each saying on
+hover what it is waiting for, rather than hidden: a reader comparing the app against
+`docs/03` §1.1 should be able to see the gap. A screen here is one panel of read-only
+measurements, so a second pane had nothing to hold.
+
+The app opens on `/welcome`: one sentence and one button. It is not in the menu and not
+reachable from it — it is where the window starts and where `File ▸ Close Map` returns to, since
+"nothing is open" both before and after are the same state. `FirstScreen`-style guidance belongs
+in the place a user is stuck, and every screen shows a short empty state of its own when a map
+is not open.
+
+## Map text is decoded and drawn in the author's colours
+
+A map name in the wild is not a name: it is `|cffffff00IMBA 3.83f AI|r`, or
+`羊羊快跑4.34|CFF1FBF00最终正式版` with no reset at all — the colour runs to the end of the string.
+Descriptions carry `|n` breaks and more of the same.
+
+Those codes are a conclusion about what the bytes mean, so the decoder lives in the core —
+`war3_map::plain` / `war3_map::spans` in `crates/war3-map/src/text.rs` — and `war3 map info`
+prints with it too. The two views cannot disagree about what a map is called.
+
+⚠️ Three things that module records and a re-implementation would get wrong:
+
+- The byte order is `AARRGGBB`, not `RRGGBBAA`. The commonest code, `|cffffff00`, reads as the
+  same colour either way, which is exactly why it is a trap.
+- The alpha byte is `00` on most real text — the Sentinel's `|c00ff0303` — so honouring it would
+  make the two commonest faction colours invisible. It is not sent to the interface at all.
+- `|C` in upper case is real and the reset is optional. Measured across 168 local maps, only
+  `|c` and `|r` occur; `|n` and `||` are handled so a map that uses them is not mangled, and are
+  not claimed to have been seen.
+
+The colours are **rendered**, not stripped: [`StyledText.vue`](src/components/StyledText.vue)
+draws each run, and [`colour.ts`](src/colour.ts) keeps the author's hue and saturation while
+solving the lightness for WCAG AA against the current surface. Drawing the stored RGB is not an
+option — most map text is white, and white on this light background is invisible. A fixed
+lightness band does not work either: measured, pure yellow is 2.49:1 at HSL lightness 32 on this
+surface and a blue in the same band is 8:1, so the lightness has to be derived from each
+colour's own contrast.
+
+## The record lists are capped on purpose
+
+`(4)LostTemple.w3m` holds **121 units and 5,317 doodads**. Serialising all of them
+across the IPC bridge to render a table nobody scrolls is the wrong default, so the
+detailed records stop at `DETAIL_LIMIT` (200) and the panel states in words how many it
+is not showing. A silent truncation would make a partial list look complete.
+
+The aggregates — file version, record count, distinct types, the ranked type histogram,
+the per-player counts — are computed **in Rust**, and they are the same figures
+`war3 map units` and `war3 map doodads` print. Two implementations of "most common
+types" would be free to disagree about a map without anyone noticing which was right.
+
+⚠️ `war3 map units` prints **twelve** type rows and `(4)LostTemple.w3m` has **22**
+distinct unit types. The DTO carries the full histogram as well as the ranked head, so
+the panel can say "the 12 commonest of 22" instead of presenting a head as the whole.
 
 ## Layout
 
@@ -32,11 +109,14 @@ w3wright-world-editor/
 ├── Cargo.toml            # workspace of one (see the comment there — it is load-bearing)
 ├── .cargo/config.toml    # dev-only: patches war3-* to the local checkout
 ├── index.html            # Vite entry
+├── pages/                # one file per screen; the route table is generated from it
 ├── src/                  # Vue 3 + TypeScript front end
+│   ├── nav.ts            # the menu: the one table behind the menu bar, and the navigation
 │   ├── types.ts          # mirrors src-tauri/src/dto.rs by hand
 │   ├── format.ts         # byte sizes, file names
-│   └── components/
-├── src-tauri/            # the Rust app: Tauri config, commands, DTOs
+│   ├── components/       # the shell (TitleBar, MenuBar) and one panel per view
+│   └── composables/      # useOpenMap (the open map, shared) and useWindow (its controls)
+├── src-tauri/            # the Rust app: Tauri config, commands, DTOs (see its README)
 └── package.json
 ```
 
@@ -85,8 +165,9 @@ published artefact cannot carry a filesystem path into someone else's build.
 | `war3-map` | `0.0.2` | `0.0.3` | the map model |
 | `war3-archive` | `0.0.2` | `0.0.3` | the real member list |
 | `war3-core`, `war3-terrain` | `0.0.2` | `0.0.3` | transitively |
-| `war3-project` | **not published** | `0.0.3` | not yet — the save loop |
-| `war3-object` | **not published** | `0.0.3` | not yet — the object editor |
+| `war3-project` | **not published** | `0.0.3` | member dispositions |
+| `war3-object` | **not published** | `0.0.3` | the object view |
+| `war3-meta` | **not published** | `0.0.3` | transitively, through `war3-object` |
 
 Only the crates actually used are declared. Seven went in when this app was
 scaffolded and it used none of them, which is a compile cost and a claim about the
@@ -94,15 +175,24 @@ design that was not true.
 
 **The blocker is the version, not the missing crates.** Cargo treats `0.0.x` as
 exact, so a requirement of `"0.0.3"` is **not** satisfied by a published `0.0.2`.
-Until `0.0.3` is published, only a build with the local patch works.
+Until `0.0.3` is published, only a build with the local patch works — and for
+`war3-object` and `war3-meta` **nothing** is published at all, so the object view has
+no release path whatsoever yet. See the release checklist.
+
+⚠️ A transitive crate has to be patched too, even when no code here names it.
+`war3-object` depends on `war3-meta` by version, so leaving `war3-meta` out of
+`.cargo/config.toml` fails the build on a crate that cannot be resolved at all — one
+level further out than the version mismatch above, and with the same cause.
 
 ### Release checklist
 
 1. In the `w3wright` checkout, bump `[workspace.package] version` and the
    `version` keys in `[workspace.dependencies]` together, then run
    `cargo package --workspace` from a **fresh** target directory to verify.
-2. Publish the crates this app uses. `war3-project` and `war3-object` are not needed
-   until the features that use them land — publish them with that change.
+2. Publish the crates this app uses. `war3-project`, `war3-object` and `war3-meta` are
+   **not on crates.io at all** — member dispositions and the object view depend on
+   them, so those features have no release path until they are published. Publish them
+   before claiming a release of this app builds.
 3. Update the version strings in `src-tauri/Cargo.toml` to the published version.
 4. Build with the patch **disabled** to prove the release path works — nothing
    else proves it, because the patch hides the failure. Temporarily rename

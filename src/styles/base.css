@@ -108,3 +108,110 @@
     --badge-fill-a: 0.6;
   }
 }
+
+/*
+ * Dense numeric tables: the terrain layer histogram, the unit type tally, the record
+ * lists.
+ *
+ * ⚠️ **These live here rather than in each panel's `<style scoped>` block**, which is
+ * the second thing in this file that a utility cannot express. Two of them are
+ * genuinely out of reach: `border-collapse` has no utility in the preset, and
+ * styling `th`/`td` means styling a *descendant*, which a class on the table cannot
+ * do. So a scoped block would be a copy per panel, and three copies of one table style
+ * is how the editor's screens drift apart — the terrain table and the unit table were
+ * already written with different paddings and font sizes in two files.
+ *
+ * Everything a utility *can* say stays in the template: column widths, text alignment,
+ * a per-column minimum, truncation. `.records` below holds the one column definition
+ * that has no utility, and says why.
+ */
+.data-table {
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  width: 100%;
+}
+
+.data-table th,
+.data-table td {
+  padding: 0.15rem 0.5rem;
+  text-align: left;
+}
+
+.data-table th {
+  font-weight: 500;
+  opacity: 0.6;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* The rule is on the top of each cell rather than around the table, so a run of rows
+ * reads as one list instead of a stack of boxes. */
+.data-table td {
+  border-top: 1px solid rgb(128 128 128 / 0.15);
+}
+
+/*
+ * The column definition for the unit and doodad record lists.
+ *
+ * A `grid-template-columns`-style width table is the canonical example of a rule no
+ * utility covers: right-aligned numeric columns are sized against each other, and one
+ * `max-width` on the table keeps the last column from ending a foot away from the
+ * first.
+ *
+ * ⚠️ The numeric run is **columns five onwards**, and the two record tables are ordered
+ * so that it can be one rule for both: type, variation and position on the left, every
+ * number after them on the right. A text column to the right of a number is the case
+ * this exists to catch — the doodad list's `flags` is a name, not a number, and it
+ * would have been flipped if the raw byte had stayed in front of it.
+ */
+.records-table {
+  max-width: 62rem;
+}
+
+.records-table th:nth-child(n + 5),
+.records-table td:nth-child(n + 5) {
+  text-align: right;
+}
+
+/* The position column is the one that has to stay on one line: the three numbers are
+ * read as one value, and wrapping them puts a coordinate on two rows. */
+.records-table td:nth-child(3) {
+  white-space: nowrap;
+}
+
+/*
+ * Makes a 0.1% difference visible where the number alone hides it, and gives a
+ * one-record type a bar rather than nothing. `currentColor` so the bar follows the
+ * text colour, including under a high-contrast theme.
+ */
+.bar {
+  display: block;
+  height: 0.7rem;
+  background: currentColor;
+  opacity: 0.35;
+  border-radius: 2px;
+  min-width: 1px;
+}
+
+/*
+ * The menu popup's opaque surface.
+ *
+ * ⚠️ **This cannot be a utility**, and getting that wrong is what put white-on-white text in
+ * a dark window once already. UnoCSS's `dark:` variant compiles to a `.dark` **ancestor
+ * class** (`.dark .dark\:bg-…`), and this app has no such class: it follows the system scheme
+ * with `prefers-color-scheme`, like every other themed value in this file. So `dark:bg-…`
+ * matched nothing and the popup stayed white while the text went light.
+ *
+ * The colour is opaque rather than a tint because the popup floats over the Explorer, which
+ * has its own tint — two translucent layers stack into a third colour nobody chose.
+ */
+.menu-popup {
+  background: #fff;
+}
+
+@media (prefers-color-scheme: dark) {
+  .menu-popup {
+    background: #2b2b2b;
+  }
+}

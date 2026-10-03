@@ -39,7 +39,12 @@ export default defineConfig({
 
   shortcuts: [
     // ── Page frame ─────────────────────────────────────────────────────────────
-    ['page-body', 'flex flex-col max-w-60rem px-6 py-5'],
+    // ⚠️ `items-start` is load-bearing, not tidiness. A flex column stretches its children
+    // across the axis by default, so a lone `<button>` became a full-width bar and a `<ul>` a
+    // full-width block — visible only once the button stood alone, which is why it survived so
+    // long. Containers that really do want the whole width say `w-full`; everything else sizes
+    // to its content.
+    ['page-body', 'flex flex-col items-start max-w-60rem px-6 py-5'],
     ['page-title', 'm-0 text-1.5rem text-left'],
     ['page-path', 'm-0 mb-5 text-0.8rem opacity-60 break-all'],
     ['section-head', 'm-0 mt-6 mb-2 text-0.8rem uppercase tracking-0.06em opacity-60 text-left'],

@@ -15,10 +15,11 @@
 # found war3_core::FourCC`), so this paragraph is worth reading before deleting an
 # entry that looks unused.
 #
-# ⚠️ The set below is exactly what the app reaches through its one direct
-# dependency. When `war3-project` or `war3-object` is added to the manifest, add it
-# here in the same change — a crate that is declared but unpatched resolves from
-# the registry, which is a different copy of the code than the one being edited.
+# ⚠️ The set below is exactly what the app reaches through its direct
+# dependencies, including the ones no code here names. When a crate is added to the
+# manifest, add it and its `war3-*` dependencies here in the same change — a crate
+# that is declared but unpatched resolves from the registry, which is a different
+# copy of the code than the one being edited.
 #
 # ⚠️ The path is relative to *this* file, so it only resolves on a machine with
 # the `w3wright` checkout as a sibling directory. That is the correct trade: a
@@ -30,9 +31,16 @@
 # ⚠️ The path also has to be kept in step with the versions in
 # `src-tauri/Cargo.toml`: a requirement that the local crate's version does not
 # satisfy fails the build by design (see the comment in that file).
+#
+# ⚠️ `war3-meta` is listed although nothing here names it. `war3-object` depends
+# on it **by version**, and both are unpublished, so without this entry the build
+# fails on a dependency that cannot be resolved at all — the same class of
+# problem the paragraph above describes, one crate further out.
 [patch.crates-io]
 war3-core = { path = "../w3wright/crates/war3-core" }
 war3-archive = { path = "../w3wright/crates/war3-archive" }
 war3-map = { path = "../w3wright/crates/war3-map" }
 war3-terrain = { path = "../w3wright/crates/war3-terrain" }
 war3-project = { path = "../w3wright/crates/war3-project" }
+war3-meta = { path = "../w3wright/crates/war3-meta" }
+war3-object = { path = "../w3wright/crates/war3-object" }

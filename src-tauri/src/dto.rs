@@ -21,10 +21,96 @@
 //! `TRIGSTR_` reference, working out a size — all of that is the core's job, and
 //! the DTO only carries the answer. See `docs/03` §1.1: the interface must not
 //! reimplement format logic.
+//!
+//! # The one thing this layer does compute
+//!
+//! Histograms: how many units of each type, which types are commonest, how many records
+//! each player owns. Those are aggregations over values the core already parsed, not
+//! readings of bytes, and they are computed here rather than in the interface on purpose
+//! \u2014 `war3 map units` prints the same lists, and two implementations of "most common
+//! types" would be free to disagree about a map without anyone noticing which was right.
+//!
 
 use serde::Serialize;
 use war3_core::diag::Diagnostics;
 
+/// One run of text with an optional colour.
+///
+/// # Why the colour is three numbers and not a CSS string
+///
+/// The panel cannot draw the author's colour unchanged: `|cffffff00` is white, and white text
+/// on this window's light background is invisible. The fix is the one `src/badges.ts` already
+/// uses for the same problem — keep the hue and saturation, and let the stylesheet choose a
+/// lightness that works in the current colour scheme. That needs the *components*, so sending
+/// `#ffffff` would have thrown away the numbers the renderer needs.
+///
+/// ⚠️ There is no alpha. WC3 writes one and it is `0` on most real text, which is fully
+/// transparent; the game ignores it, and `war3_map::Markup::colour` deliberately does not
+/// return it so that no renderer can honour it by mistake.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RichSegment {
+    /// The text of this run.
+    pub text: String,
+    /// The author's colour for it, or `None` for text left at the default.
+    pub colour: Option<SegmentColour>,
+}
+
+/// A colour as stored in the map, before the renderer decides how light to draw it.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SegmentColour {
+    /// Red, 0–255.
+    pub red: u8,
+    /// Green, 0–255.
+    pub green: u8,
+    /// Blue, 0–255.
+    pub blue: u8,
+}
+
+/// A map text field, split into the runs it is made of.
+///
+/// Always at least one segment: a field with no markup is one segment with no colour, so the
+/// panel renders both cases through one path rather than branching on "is there any colour in
+/// this string". An empty field is one empty segment, for the same reason.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RichText {
+    /// The runs, in order.
+    pub segments: Vec<RichSegment>,
+}
+
+impl RichText {
+    /// Splits a core string field into the runs the author coloured.
+    ///
+    /// The decoding is `war3_map::spans`, which is the same reader `war3 map info` prints with —
+    /// nothing here decides what a code means, it only reshapes what the core decided.
+    #[must_use]
+    pub fn from_core(s: &str) -> Self {
+        let segments: Vec<RichSegment> = war3_map::spans(s)
+            .into_iter()
+            .map(|run| RichSegment {
+                colour: run
+                    .colour()
+                    .map(|(red, green, blue)| SegmentColour { red, green, blue }),
+                text: run.text().to_owned(),
+            })
+            .collect();
+
+        // `spans` returns nothing for an empty string; the panel would then have no node to
+        // render. One empty segment keeps "the field is empty" and "the field is missing" from
+        // being the same shape in the template.
+        if segments.is_empty() {
+            return Self {
+                segments: vec![RichSegment {
+                    text: String::new(),
+                    colour: None,
+                }],
+            };
+        }
+        Self { segments }
+    }
+}
 
 /// Everything the interface shows about one open map.
 ///
@@ -37,14 +123,35 @@ use war3_core::diag::Diagnostics;
 pub struct MapSummary {
     /// The path that was opened, as given.
     pub path: String,
-    /// Map name, with any `TRIGSTR_` reference already resolved by the core.
+    /// Map name with any `TRIGSTR_` reference already resolved by the core, and with the
+    /// markup codes removed.
+    ///
+    /// This is the plain form, for the places that cannot show a colour — a window title, a
+    /// `title` tooltip, a list of maps. [`MapSummary::name_rich`] carries the same text with
+    /// the colours the author chose, and is what the panel draws.
     pub name: String,
-    /// Author, likewise resolved.
+    /// The author's name, plain.
     pub author: String,
-    /// Description, likewise resolved.
+    /// The description, plain.
     pub description: String,
     /// Recommended players, `None` when the format version has no such field.
     pub recommended_players: Option<String>,
+    /// The map name split into the runs the author coloured.
+    ///
+    /// # Why both forms
+    ///
+    /// Warcraft III map titles carry inline colour codes, and `羊羊快跑4.34|CFF1FBF00最终正式版`
+    /// is a real one: green for the second half, with no reset at the end. Showing the code is
+    /// wrong, and showing the text with the code *removed* throws away the only part of the
+    /// title the author deliberately marked. So both are sent: the plain string for labels, and
+    /// this for the panel, which renders each run in its colour.
+    pub name_rich: RichText,
+    /// The author's name, split the same way.
+    pub author_rich: RichText,
+    /// The description, split the same way.
+    pub description_rich: RichText,
+    /// Recommended players, split the same way; `None` when there is no such field.
+    pub recommended_players_rich: Option<RichText>,
     /// `.w3i` format version.
     pub format_version: i32,
     /// Tileset as a name, e.g. `Lordaeron Summer`.
@@ -239,6 +346,553 @@ pub struct TerrainInfo {
     /// How many tile points use each ground texture index, 0 through 15.
     pub layer_histogram: [usize; 16],
 }
+
+/// One placed unit or item, as the list shows it.
+///
+/// # Why this is not the core's `Unit`
+///
+/// The core's record has twenty-one fields and four nested tables. Sending all of them
+/// would be a second copy of the format to keep in step, and most of them — the
+/// random-unit payload, the ability modifications, the drop sets — are not on this
+/// screen. What is here is what is rendered; the rest stays in the core until an editing
+/// screen needs it, exactly as `docs/03` §1.1 requires.
+///
+/// Default fillers are reported rather than pre-resolved: `-1` hit points means "the
+/// type's default", and looking that default up needs the object data, which is a
+/// different question for a different screen.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnitRecord {
+    /// Unit or item type, e.g. `hfoo`; `uDNR`/`iDNR` for a random one.
+    pub kind: String,
+    /// Which variant of the model to use.
+    pub variation: i32,
+    /// World position.
+    pub x: f32,
+    /// World position.
+    pub y: f32,
+    /// World position.
+    pub z: f32,
+    /// Rotation in radians.
+    pub rotation: f32,
+    /// Owning player, 0-based; 16 is neutral passive.
+    pub player: i32,
+    /// Hit points, or `-1` for the type's default.
+    pub hit_points: i32,
+    /// Mana: `-1` for the type's default, `0` for a unit with no mana.
+    pub mana: i32,
+    /// Index into the map's item tables, or `null` for version 7 files, which have no
+    /// such field.
+    pub item_table: Option<i32>,
+    /// How many dropped-item sets the record carries.
+    pub drop_sets: u32,
+    /// How many inventory entries it carries.
+    pub inventory: u32,
+    /// How many ability modifications it carries.
+    pub abilities: u32,
+    /// Gold carried, default 12500.
+    pub gold: i32,
+    /// Target acquisition range; `-1` is normal and `-2` is "camp".
+    pub target_acquisition: f32,
+    /// Hero level, 1 for non-heroes.
+    pub hero_level: i32,
+    /// The World Editor's creation number.
+    pub creation_number: i32,
+}
+
+/// One placed doodad, as the list shows it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DoodadRecord {
+    /// Doodad type, e.g. `LTlt` for a Lordaeron summer tree.
+    pub kind: String,
+    /// Which variant of the model to use.
+    pub variation: i32,
+    /// World position.
+    pub x: f32,
+    /// World position.
+    pub y: f32,
+    /// World position.
+    pub z: f32,
+    /// Rotation in radians.
+    pub rotation: f32,
+    /// The stored flags value.
+    pub flags: u8,
+    /// That value as the core names it.
+    ///
+    /// ⚠ Composed by `DoodadFile::flags_name`, **not** by a match in this layer. The
+    /// byte is a small integer rather than independent bits, and which integers mean what
+    /// is a format conclusion — the one thing the interface may not hold an opinion
+    /// about.
+    pub flags_name: String,
+    /// Life as a percentage of the type's default.
+    pub life: u8,
+    /// Pointer to a random item table in `war3map.w3i`, or `-1` for none.
+    pub item_table: i32,
+    /// How many item sets the record carries.
+    pub item_sets: u32,
+    /// The World Editor's doodad number, unique per map.
+    pub editor_id: i32,
+}
+
+/// One entry in a type or player histogram.
+///
+/// `key` and `count` are deliberately not renamed to camel case: `key` is the field name
+/// a user sees, and a type key is a four-character code or a player number, not a
+/// JavaScript identifier.
+#[derive(Debug, Clone, Serialize)]
+pub struct TypeCount {
+    /// The type or player the count is for.
+    pub key: String,
+    /// How many records it covers.
+    pub count: u32,
+}
+
+/// A type histogram, with the ranked head extracted.
+///
+/// # Why the head is computed here and not in the interface
+///
+/// The interface must not sort by count and take twelve: "most common types" is a
+/// statement about the map's contents, and a second implementation of it is exactly the
+/// divergence `docs/03` §1.1 exists to prevent. The full histogram is carried too, and
+/// that is not redundancy — `war3 map units` prints **twelve rows** while
+/// `(4)LostTemple.w3m` has **22** distinct unit types, so the head alone cannot say how
+/// much it is a head *of*.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TypeSummary {
+    /// How many distinct types there are.
+    pub distinct: u32,
+    /// How many records the histogram covers.
+    pub total: u32,
+    /// Every type and its count, most common first.
+    pub counts: Vec<TypeCount>,
+    /// The same list, truncated to the number the panel displays.
+    pub leaders: Vec<TypeCount>,
+}
+
+/// How many types the ranked list keeps.
+///
+/// Twelve is `war3 map units` and `war3 map doodads`' own head, and matching it is the
+/// point: a user comparing the panel against the command line must see the same list.
+pub const LEADER_COUNT: usize = 12;
+
+/// Ranks a histogram, commonest first, ties by key.
+///
+/// The tie-break matters more than it sounds: `HashMap` iteration order would otherwise
+/// shuffle equal-count types between runs, and a list that reorders itself is one nobody
+/// can compare against a printed one.
+fn ranked(counts: &std::collections::BTreeMap<String, u32>) -> Vec<TypeCount> {
+    let mut ranked: Vec<TypeCount> = counts
+        .iter()
+        .map(|(key, count)| TypeCount {
+            key: key.clone(),
+            count: *count,
+        })
+        .collect();
+    ranked.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.key.cmp(&b.key)));
+    ranked
+}
+
+/// Lists a histogram in key order, for the ones that are not ranked.
+///
+/// The player histogram is the case: `war3 map units` prints players in ascending
+/// numeric order and the numbers are their own sort key, so ranking it by count would put
+/// player 12's hundred units below player 0's one and read as a bug.
+fn ascending(counts: &std::collections::BTreeMap<i32, u32>) -> Vec<TypeCount> {
+    counts
+        .iter()
+        .map(|(player, count)| TypeCount {
+            key: format!("player {player}"),
+            count: *count,
+        })
+        .collect()
+}
+
+/// Builds a [`TypeSummary`] from a histogram.
+fn type_summary(counts: &std::collections::BTreeMap<String, u32>) -> TypeSummary {
+    let ranked = ranked(counts);
+    let total = ranked.iter().map(|entry| entry.count).sum();
+    TypeSummary {
+        distinct: count(ranked.len()),
+        total,
+        leaders: ranked.iter().take(LEADER_COUNT).cloned().collect(),
+        counts: ranked,
+    }
+}
+
+/// The player histogram, as the panel prints it.
+fn by_player(units: &[war3_map::Unit]) -> Vec<TypeCount> {
+    let mut counts = std::collections::BTreeMap::new();
+    for unit in units {
+        *counts.entry(unit.player).or_insert(0u32) += 1;
+    }
+    ascending(&counts)
+}
+
+/// How many records the detail list keeps.
+///
+/// # Why the list is capped, and why the panel says so
+///
+/// `(4)LostTemple.w3m` holds 121 units but **5,317 doodads**. Serialising all of them
+/// across the IPC bridge to render a table nobody scrolls is the wrong default, so the
+/// detailed records stop at this many and the panel names the number and how many are
+/// missing. A silent truncation would make a partial list look complete, which is the
+/// failure this constant exists to avoid.
+pub const DETAIL_LIMIT: usize = 200;
+
+/// A map's placed units and items.
+///
+/// `ok` is `false` when the map's `war3mapUnits.doo` is absent or unreadable, and
+/// `reason` then says which. That is not an error state: a map without units is a valid
+/// map, and the core models the file as optional for exactly that reason. The two cases
+/// line up with what `war3 map units` reports.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnitView {
+    /// The map this was read from.
+    pub path: String,
+    /// `false` when the map has no readable `war3mapUnits.doo`.
+    pub ok: bool,
+    /// Why, in the core's own words, when `ok` is `false`.
+    pub reason: Option<String>,
+    /// The header numbers and histograms, present only when `ok`.
+    pub info: Option<UnitInfo>,
+    /// The first [`DETAIL_LIMIT`] records, in file order.
+    pub records: Vec<UnitRecord>,
+    /// Diagnostics from the parse and from the map.
+    pub diagnostics: Vec<DiagnosticView>,
+}
+
+/// `war3mapUnits.doo`'s header numbers and histograms.
+///
+/// Every field here is also printed by `war3 map units`. Matching that output is not
+/// politeness: the moment the screen and the command line can disagree about how many
+/// units a map has, one of them is lying and nobody can tell which.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnitInfo {
+    /// On-disk format version.
+    pub version: i32,
+    /// Sub-version. It does **not** select the record layout; the version does.
+    pub subversion: i32,
+    /// How many records parsed.
+    pub records: u32,
+    /// Units above hero level 1.
+    pub levelled: u32,
+    /// Units carrying a real item table index or a non-empty inventory.
+    ///
+    /// # Why this is not "how many have the field"
+    ///
+    /// Version 8 always carries the item-table pointer, so counting its presence would
+    /// claim every unit in a version 8 map has item data. Only an index that is not `-1`,
+    /// or an inventory with something in it, counts.
+    pub placed_items: u32,
+    /// How many records the detail list below this carries.
+    pub shown: u32,
+    /// Types by frequency.
+    pub types: TypeSummary,
+    /// Records per player, player order.
+    pub players: Vec<TypeCount>,
+}
+
+/// A map's placed doodads.
+///
+/// The same shape as [`UnitView`], for the same reasons.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DoodadView {
+    /// The map this was read from.
+    pub path: String,
+    /// `false` when the map has no readable `war3map.doo`.
+    pub ok: bool,
+    /// Why, in the core's own words, when `ok` is `false`.
+    pub reason: Option<String>,
+    /// The header numbers and histogram, present only when `ok`.
+    pub info: Option<DoodadInfo>,
+    /// The first [`DETAIL_LIMIT`] records, in file order.
+    pub records: Vec<DoodadRecord>,
+    /// Diagnostics from the parse and from the map.
+    pub diagnostics: Vec<DiagnosticView>,
+}
+
+/// `war3map.doo`'s header numbers and histogram.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DoodadInfo {
+    /// On-disk format version: 7 for the fixed record, 8 for the item-bearing one.
+    pub version: i32,
+    /// Sub-version. Observed values are 9 and 11, and it does not select the layout.
+    pub subversion: i32,
+    /// Version word of the special-doodad block.
+    pub special_version: i32,
+    /// How many records parsed.
+    pub records: u32,
+    /// How many special doodads follow them.
+    pub special: u32,
+    /// The special doodads' types, by frequency.
+    ///
+    /// ⚠ Not printed by `war3 map doodads`, which reports the count alone. It is carried
+    /// because the block is otherwise invisible: every sample here has zero of them, and
+    /// "0 special doodads" tells a reader nothing about whether the field was read at all.
+    pub special_kinds: Vec<TypeCount>,
+    /// How many records the detail list below this carries.
+    pub shown: u32,
+    /// Types by frequency.
+    pub types: TypeSummary,
+}
+
+/// One field change on an object.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectModification {
+    /// The field's four-character id, e.g. `unam` for a unit's name.
+    pub field: String,
+    /// The value, as the core's own `Display` renders it.
+    ///
+    /// ⚠ `FieldValue` distinguishes four storage types and this collapses them to text.
+    /// That is deliberate and it is the only place the distinction is lost: nothing on a
+    /// read-only screen acts on the type, and a name for it would come from the metadata
+    /// tables, which live in the game's archives rather than the map.
+    pub value: String,
+    /// Which level the value applies to, or `null` when the kind is not levelled.
+    ///
+    /// 0 means "every level". Which kinds carry the block is the core's `is_levelled`, not
+    /// a list here.
+    pub level: Option<i32>,
+    /// Which `DataA..DataI` column the value belongs to, when levelled.
+    pub data_indicator: Option<i32>,
+}
+
+/// One object the map creates or modifies.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectEntry {
+    /// The object's own id.
+    pub id: String,
+    /// What it inherits from; empty for a modified original, whose `id` *is* the base
+    /// object.
+    pub base_id: String,
+    /// Whether the game treats it as a hero.
+    ///
+    /// From `ObjectKind::is_hero_id`, which knows the uppercase-first-letter rule and that
+    /// the rule only means anything for units. Deciding it here would be a format
+    /// conclusion.
+    pub hero: bool,
+    /// How many modifications the record holds in the file.
+    pub modifications: u32,
+    /// The modifications shown, at most [`MODIFICATION_LIMIT`] of them.
+    pub shown: Vec<ObjectModification>,
+}
+
+/// How many modifications one object's entry shows.
+///
+/// The same reasoning as [`DETAIL_LIMIT`]: enough to see what the author changed, bounded
+/// so one object with a thousand fields cannot dominate the payload. The count is carried
+/// beside it so the panel can say what is missing.
+pub const MODIFICATION_LIMIT: usize = 12;
+
+/// One category of object data: the unit, item, ability and four others.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectCategory {
+    /// The map member this came from, e.g. `war3map.w3u`.
+    pub map_file: String,
+    /// The category, as the core's own name for it.
+    pub kind: String,
+    /// On-disk format version.
+    pub version: i32,
+    /// How many Blizzard objects the map modifies.
+    pub original: u32,
+    /// How many objects the map creates.
+    pub custom: u32,
+    /// How many entries the lists below carry, across both tables.
+    pub shown: u32,
+    /// The objects created by the map, first.
+    pub custom_objects: Vec<ObjectEntry>,
+    /// The Blizzard objects it modifies.
+    pub modified_objects: Vec<ObjectEntry>,
+}
+
+/// A map's object data, across every category it has.
+///
+/// There is no `ok` flag here, unlike the unit and doodad views. A map with no object
+/// files is not a map with something unavailable — "no object files in this map" is the
+/// whole answer, and `categories` being empty in both cases makes a second flag carry no
+/// information.
+///
+/// ⚠ **Field ids are shown unresolved.** `war3 map objects` prints names when it is given
+/// `--game-dir`, because the metadata tables that map `uhpm` to "Hit Points" live in the
+/// game's `*MetaData.slk`, not in the map. This app has no game-directory setting yet, so
+/// it shows ids and values — the same thing the command line shows without that flag, and
+/// not an error state.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectView {
+    /// The map this was read from.
+    pub path: String,
+    /// The categories present, in the core's own category order.
+    pub categories: Vec<ObjectCategory>,
+    /// Parse failures and the core's own object diagnostics.
+    pub diagnostics: Vec<DiagnosticView>,
+}
+
+/// A list length as the DTO's own count type.
+///
+/// `u32` rather than `usize`: the front end reads it as a number either way, and a length
+/// that cannot be a `u32` is not a length any real file reports.
+fn count(value: usize) -> u32 {
+    u32::try_from(value).unwrap_or(u32::MAX)
+}
+
+/// Builds the unit header numbers and histogram.
+pub fn unit_summary(units: &war3_map::UnitFile) -> UnitInfo {
+    let mut kinds = std::collections::BTreeMap::new();
+    for unit in &units.units {
+        *kinds.entry(unit.kind.to_string()).or_insert(0u32) += 1;
+    }
+
+    UnitInfo {
+        version: units.version,
+        subversion: units.subversion,
+        records: count(units.units.len()),
+        levelled: count(units.units.iter().filter(|u| u.hero_level > 1).count()),
+        placed_items: count(
+            units
+                .units
+                .iter()
+                .filter(|u| u.item_table.is_some_and(|t| t >= 0) || !u.inventory.is_empty())
+                .count(),
+        ),
+        shown: count(units.units.len().min(DETAIL_LIMIT)),
+        types: type_summary(&kinds),
+        players: by_player(&units.units),
+    }
+}
+
+/// Builds the doodad header numbers and histogram.
+pub fn doodad_summary(doodads: &war3_map::DoodadFile) -> DoodadInfo {
+    let mut kinds = std::collections::BTreeMap::new();
+    for doodad in &doodads.doodads {
+        *kinds.entry(doodad.kind.to_string()).or_insert(0u32) += 1;
+    }
+    let mut special_kinds = std::collections::BTreeMap::new();
+    for special in &doodads.special {
+        *special_kinds
+            .entry(special.kind.to_string())
+            .or_insert(0u32) += 1;
+    }
+
+    DoodadInfo {
+        version: doodads.version,
+        subversion: doodads.subversion,
+        special_version: doodads.special_version,
+        records: count(doodads.doodads.len()),
+        special: count(doodads.special.len()),
+        special_kinds: ranked(&special_kinds),
+        shown: count(doodads.doodads.len().min(DETAIL_LIMIT)),
+        types: type_summary(&kinds),
+    }
+}
+
+/// Flattens one unit record for the list.
+pub fn unit_record(unit: &war3_map::Unit) -> UnitRecord {
+    UnitRecord {
+        kind: unit.kind.to_string(),
+        variation: unit.variation,
+        x: unit.position.x,
+        y: unit.position.y,
+        z: unit.position.z,
+        rotation: unit.rotation,
+        player: unit.player,
+        hit_points: unit.hit_points,
+        mana: unit.mana,
+        item_table: unit.item_table,
+        drop_sets: count(unit.drop_sets.len()),
+        inventory: count(unit.inventory.len()),
+        abilities: count(unit.abilities.len()),
+        gold: unit.gold,
+        target_acquisition: unit.target_acquisition,
+        hero_level: unit.hero_level,
+        creation_number: unit.creation_number,
+    }
+}
+
+/// Flattens one doodad record for the list.
+pub fn doodad_record(doodad: &war3_map::Doodad) -> DoodadRecord {
+    DoodadRecord {
+        kind: doodad.kind.to_string(),
+        variation: doodad.variation,
+        x: doodad.position.x,
+        y: doodad.position.y,
+        z: doodad.position.z,
+        rotation: doodad.rotation,
+        flags: doodad.flags,
+        flags_name: war3_map::DoodadFile::flags_name(doodad.flags).to_owned(),
+        life: doodad.life,
+        item_table: doodad.item_table,
+        item_sets: count(doodad.item_sets.len()),
+        editor_id: doodad.editor_id,
+    }
+}
+
+/// Flattens one object, keeping at most [`MODIFICATION_LIMIT`] modifications.
+fn object_entry(object: &war3_object::Object) -> ObjectEntry {
+    ObjectEntry {
+        id: object.id.to_string(),
+        base_id: if object.base_id.is_zero() {
+            String::new()
+        } else {
+            object.base_id.to_string()
+        },
+        hero: war3_object::ObjectKind::is_hero_id(object.id),
+        modifications: count(object.modifications.len()),
+        shown: object
+            .modifications
+            .iter()
+            .take(MODIFICATION_LIMIT)
+            .map(|m| ObjectModification {
+                field: m.field.to_string(),
+                value: m.value.to_string(),
+                level: m.level.map(|l| l.level),
+                data_indicator: m.level.map(|l| l.data_indicator),
+            })
+            .collect(),
+    }
+}
+
+/// Builds one category's view from a parsed object file.
+///
+/// The entries are truncated per table rather than across both, because the two are
+/// printed as separate lists — the same split `war3 map objects` uses.
+pub fn object_category(file: &war3_object::ObjectFile, kind_name: &str) -> ObjectCategory {
+    let custom_objects: Vec<ObjectEntry> = file
+        .table
+        .custom
+        .iter()
+        .take(DETAIL_LIMIT)
+        .map(object_entry)
+        .collect();
+    let modified_objects: Vec<ObjectEntry> = file
+        .table
+        .original
+        .iter()
+        .take(DETAIL_LIMIT)
+        .map(object_entry)
+        .collect();
+
+    ObjectCategory {
+        map_file: file.kind.map_file().to_owned(),
+        kind: kind_name.to_owned(),
+        version: file.version,
+        original: count(file.table.original.len()),
+        custom: count(file.table.custom.len()),
+        shown: count(custom_objects.len() + modified_objects.len()),
+        custom_objects,
+        modified_objects,
+    }
+}
+
 /// One diagnostic, flattened for display.
 ///
 /// `severity` and `code` are strings rather than the core's enums: they are shown,
@@ -264,11 +918,7 @@ impl MapSummary {
     /// Members are sorted here rather than in the core: the core's order is the
     /// archive's, which is meaningful to it and not to a list view.
     #[must_use]
-    pub fn from_parse(
-        path: &str,
-        archive: &war3_archive::Archive,
-        map: &war3_map::Map,
-    ) -> Self {
+    pub fn from_parse(path: &str, archive: &war3_archive::Archive, map: &war3_map::Map) -> Self {
         let mut members: Vec<Member> = archive
             .file_names()
             .into_iter()
@@ -284,25 +934,27 @@ impl MapSummary {
                 // would decide, and `extract` records the same reasons when it really
                 // runs. Collecting them twice would double every warning in the panel.
                 let mut scratch = Diagnostics::new();
-                let (disposition, reason) = match war3_project::disposition::of(
-                    archive,
-                    name,
-                    &mut scratch,
-                ) {
-                    Ok(war3_project::Disposition::Textified { .. }) => ("text".to_string(), String::new()),
-                    Ok(war3_project::Disposition::KeptBinary { reason }) => {
-                        ("binary".to_string(), reason)
-                    }
-                    Ok(war3_project::Disposition::KeptRaw) => (
-                        "raw".to_string(),
-                        "this workspace cannot decode it, so its stored block is kept".to_string(),
-                    ),
-                    Ok(war3_project::Disposition::Absent) => ("absent".to_string(), String::new()),
-                    // `of` only errors when the container is inconsistent, which the
-                    // summary is not the place to fail over: the member still exists
-                    // and still has a size.
-                    Err(e) => ("binary".to_string(), e.to_string()),
-                };
+                let (disposition, reason) =
+                    match war3_project::disposition::of(archive, name, &mut scratch) {
+                        Ok(war3_project::Disposition::Textified { .. }) => {
+                            ("text".to_string(), String::new())
+                        }
+                        Ok(war3_project::Disposition::KeptBinary { reason }) => {
+                            ("binary".to_string(), reason)
+                        }
+                        Ok(war3_project::Disposition::KeptRaw) => (
+                            "raw".to_string(),
+                            "this workspace cannot decode it, so its stored block is kept"
+                                .to_string(),
+                        ),
+                        Ok(war3_project::Disposition::Absent) => {
+                            ("absent".to_string(), String::new())
+                        }
+                        // `of` only errors when the container is inconsistent, which the
+                        // summary is not the place to fail over: the member still exists
+                        // and still has a size.
+                        Err(e) => ("binary".to_string(), e.to_string()),
+                    };
                 Some(Member {
                     name: name.to_owned(),
                     size: block.uncompressed_size,
@@ -355,10 +1007,29 @@ impl MapSummary {
 
         Self {
             path: path.to_owned(),
-            name: map.metadata.name.clone(),
-            author: map.metadata.author.clone(),
-            description: map.metadata.description.clone(),
-            recommended_players: map.metadata.recommended_players.clone(),
+            // ⚠️ Markup decoded, and decoded by the **core**. A map name is usually
+            // `|cffffff00IMBA 3.83f AI|r`, and those codes are a conclusion about what the bytes
+            // mean — so `war3_map::plain` decides, and `war3 map info` calls the same function.
+            // A `strip_prefix("|c")` here would be a second, quietly different answer: it would
+            // miss a colour that is not first in the string, and it would leave `|r` behind.
+            name: war3_map::plain(&map.metadata.name),
+            author: war3_map::plain(&map.metadata.author),
+            description: war3_map::plain(&map.metadata.description),
+            recommended_players: map
+                .metadata
+                .recommended_players
+                .as_deref()
+                .map(war3_map::plain),
+            // The same fields again, with the runs the author coloured kept separate. Both come
+            // from `war3_map`, so the plain and the rich forms cannot disagree about the text.
+            name_rich: RichText::from_core(&map.metadata.name),
+            author_rich: RichText::from_core(&map.metadata.author),
+            description_rich: RichText::from_core(&map.metadata.description),
+            recommended_players_rich: map
+                .metadata
+                .recommended_players
+                .as_deref()
+                .map(RichText::from_core),
             format_version: map.metadata.format_version,
             // The core's `Display`, not `name()`: the command-line tool prints this
             // form, so the two screens agree character for character. Using `name()`
@@ -382,7 +1053,6 @@ impl MapSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     /// Checks the DTO against a real map, when one is pointed at.
     ///
@@ -417,6 +1087,24 @@ mod tests {
             !summary.name.starts_with("TRIGSTR_"),
             "the core resolves references, so the DTO must carry the resolved text"
         );
+        // ⚠️ And the markup is gone too. A map name in the wild is
+        // `|cffffff00IMBA 3.83f AI|r`, and a panel that showed those ten characters would be
+        // showing the reader the colour code instead of the name. This asserts the *shape*
+        // rather than one map's title, so it holds for any map pointed at.
+        for (what, text) in [
+            ("name", &summary.name),
+            ("author", &summary.author),
+            ("description", &summary.description),
+        ] {
+            assert!(
+                !text.contains("|c"),
+                "the {what} still carries a colour code: {text:?}"
+            );
+            assert!(
+                !text.contains("\r\n"),
+                "the {what} still carries the format's CRLF: {text:?}"
+            );
+        }
         assert_eq!(summary.member_count, summary.members.len());
 
         // Every member must carry a disposition, and it must come from the core rather
@@ -479,9 +1167,68 @@ mod tests {
         let mut sorted = summary.members.clone();
         sorted.sort_by(|a, b| a.name.cmp(&b.name));
         assert!(
-            summary.members.iter().map(|m| &m.name).eq(sorted.iter().map(|m| &m.name)),
+            summary
+                .members
+                .iter()
+                .map(|m| &m.name)
+                .eq(sorted.iter().map(|m| &m.name)),
             "members must be in a stable order"
         );
+    }
+
+    /// A map whose name carries colour codes must arrive decoded.
+    ///
+    /// `DotA_IMBA_3.83.w3x` stores its name as `|cffffff00IMBA 3.83 AI|r` and repeats the
+    /// pattern in its description. Both codes are stripped by `war3_map::plain`, which is the
+    /// same decoder `war3 map info` prints with — so the panel and the command line cannot
+    /// disagree about what this map is called.
+    ///
+    /// Point `W3_TEST_MAP_UNCANNY` at that map. Skipped when it is unset, like the other
+    /// real-map tests here.
+    #[test]
+    fn a_map_name_with_colour_codes_is_decoded() {
+        let Some(path) = std::env::var("W3_TEST_MAP_UNCANNY").ok() else {
+            return;
+        };
+        let archive = war3_archive::Archive::open(&path).expect("the map named by the variable");
+        let map = war3_map::Map::from_source(&archive).expect("a parseable map");
+        let summary = MapSummary::from_parse(&path, &archive, &map);
+
+        // The raw fields carry the markup. If they did not, this test would be asserting
+        // nothing and would pass on any map — which is the failure mode worth guarding.
+        assert!(
+            map.metadata.name.contains("|c"),
+            "this test needs a map whose name has a colour code, got {:?}",
+            map.metadata.name
+        );
+        assert!(
+            !summary.name.contains('|'),
+            "no code should survive: {:?}",
+            summary.name
+        );
+        assert!(
+            !summary.name.trim().is_empty(),
+            "decoding must not eat the name itself: {:?}",
+            summary.name
+        );
+        // The description is where the CRLF lives, and a label showing one would print a
+        // stray carriage return.
+        assert!(
+            map.metadata.description.contains("\r\n"),
+            "this test needs the format's line endings, got {:?}",
+            map.metadata.description
+        );
+        assert!(
+            !summary.description.contains('\r'),
+            "CRLF should be normalised: {:?}",
+            summary.description
+        );
+        assert!(
+            summary.description.contains('\n'),
+            "the line break itself must survive: {:?}",
+            summary.description
+        );
+        eprintln!("decoded name: {:?}", summary.name);
     }
 }
 
@@ -504,24 +1251,30 @@ fn strip_member_prefix(reason: &str, name: &str) -> String {
         .unwrap_or(reason)
         .to_owned()
 }
-    /// The name is removed from a diagnostic shown beside the name, and nothing else is.
-    #[test]
-    fn the_member_name_is_stripped_only_as_a_prefix() {
-        assert_eq!(
-            strip_member_prefix("WAR3MAP.WTS: no text form", "WAR3MAP.WTS"),
-            "no text form"
-        );
-        // A name that merely appears later must be left alone: the sentence is the
-        // core's, and rewriting the middle of it would make the two views disagree.
-        assert_eq!(
-            strip_member_prefix("kept as binary: WAR3MAP.WTS could not be parsed", "WAR3MAP.WTS"),
-            "kept as binary: WAR3MAP.WTS could not be parsed"
-        );
-        // A colon that is not the separator.
-        assert_eq!(strip_member_prefix("WAR3MAP.WTS:", "WAR3MAP.WTS"), "WAR3MAP.WTS:");
-        // No name at all.
-        assert_eq!(
-            strip_member_prefix("this workspace cannot decode it", "WAR3MAP.WTS"),
-            "this workspace cannot decode it"
-        );
-    }
+/// The name is removed from a diagnostic shown beside the name, and nothing else is.
+#[test]
+fn the_member_name_is_stripped_only_as_a_prefix() {
+    assert_eq!(
+        strip_member_prefix("WAR3MAP.WTS: no text form", "WAR3MAP.WTS"),
+        "no text form"
+    );
+    // A name that merely appears later must be left alone: the sentence is the
+    // core's, and rewriting the middle of it would make the two views disagree.
+    assert_eq!(
+        strip_member_prefix(
+            "kept as binary: WAR3MAP.WTS could not be parsed",
+            "WAR3MAP.WTS"
+        ),
+        "kept as binary: WAR3MAP.WTS could not be parsed"
+    );
+    // A colon that is not the separator.
+    assert_eq!(
+        strip_member_prefix("WAR3MAP.WTS:", "WAR3MAP.WTS"),
+        "WAR3MAP.WTS:"
+    );
+    // No name at all.
+    assert_eq!(
+        strip_member_prefix("this workspace cannot decode it", "WAR3MAP.WTS"),
+        "this workspace cannot decode it"
+    );
+}

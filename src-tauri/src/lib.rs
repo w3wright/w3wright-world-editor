@@ -12,10 +12,18 @@ mod dto;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // The dialog plugin's Rust half. Without this registration the front end's `open`
+        // call rejects with "plugin dialog not found", which reads as a bug in the panel
+        // rather than as a missing plugin — so it belongs here beside the other one, not
+        // in the component that happens to need it first.
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             commands::open_map,
             commands::preview_save,
             commands::read_terrain,
+            commands::read_units,
+            commands::read_doodads,
+            commands::read_objects,
             commands::backend_version
         ])
         .run(tauri::generate_context!())

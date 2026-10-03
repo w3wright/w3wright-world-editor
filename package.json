@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2.8.1",
     "@tauri-apps/plugin-opener": "^2",
     "nano-pastel": "^1.2.0",
     "vue": "^3.5.13",

@@ -1,5 +1,13 @@
-import type { MapSummary, SavePreview, TerrainView } from '../types'
+import type {
+  DoodadView,
+  MapSummary,
+  ObjectView,
+  SavePreview,
+  TerrainView,
+  UnitView
+} from '../types'
 import { invoke } from '@tauri-apps/api/core'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { ref } from 'vue'
 
 /**
@@ -17,10 +25,15 @@ import { ref } from 'vue'
  * Nothing here caches a parse. `summary` and `terrain` are the last answers the core
  * gave, and every action re-asks it. That is what keeps a save from leaving the
  * screen showing data from before the save: there is no cache to invalidate.
+ *
+ * # Why there is no path field any more
+ *
+ * A path typed by hand was the only way in until the window drew its own title bar. With
+ * no native menu there is nowhere for a stray text box to live, and a dialog is strictly
+ * better at the same job — it cannot produce a typo, and on Windows it offers the game's
+ * own map folders. So `openPath` now *takes* a path rather than reading one out of a
+ * field, and the dialog is the caller.
  */
-
-/** The path in the box, which is not necessarily the open map. */
-export const path = ref('')
 
 /** The open map, or `null` when nothing has been opened. */
 export const summary = ref<MapSummary | null>(null)
@@ -48,6 +61,24 @@ export const terrain = ref<TerrainView | null>(null)
 /** The terrain command is in flight. */
 export const terrainBusy = ref(false)
 
+/** The units of the open map, or `null` when they have not been asked for. */
+export const units = ref<UnitView | null>(null)
+
+/** The units command is in flight. */
+export const unitsBusy = ref(false)
+
+/** The doodads of the open map, or `null` when they have not been asked for. */
+export const doodads = ref<DoodadView | null>(null)
+
+/** The doodads command is in flight. */
+export const doodadsBusy = ref(false)
+
+/** The object data of the open map, or `null` when it has not been asked for. */
+export const objects = ref<ObjectView | null>(null)
+
+/** The objects command is in flight. */
+export const objectsBusy = ref(false)
+
 /**
  * Marker the backend puts in front of a message that means "does not apply here".
  *
@@ -58,27 +89,46 @@ export const terrainBusy = ref(false)
 export const NOT_APPLICABLE = 'not-applicable: '
 
 /**
- * Opens whatever path is in the box.
+ * Clears the per-map data a new map makes meaningless.
  *
- * The backend decides whether it is a map and says why not when it is not, so there is
- * no validation here beyond "the box is not empty". A second opinion in the interface
- * would be a second set of rules to keep in step.
+ * One list rather than a line per view: opening a different map invalidates every
+ * parse of the previous one, and a view added without a line here is one that shows
+ * another map's data. `summary` is set by the caller once the new map really opened.
+ */
+function forgetViews(): void {
+  terrain.value = null
+  units.value = null
+  doodads.value = null
+  objects.value = null
+  terrainBusy.value = false
+  unitsBusy.value = false
+  doodadsBusy.value = false
+  objectsBusy.value = false
+}
+
+/**
+ * Opens a map from a path the caller already has.
+ *
+ * The backend decides whether it is a map and says why not when it is not, so there is no
+ * validation here beyond "a path was given". A second opinion in the interface would be a
+ * second set of rules to keep in step — and with the dialog as the only source, the
+ * interesting failures are all the core's.
  *
  * @returns whether the map opened, so a caller can navigate on success only.
  */
-export async function openPath(): Promise<boolean> {
-  const target = path.value.trim()
-  if (!target || busy.value)
+export async function openPath(target: string): Promise<boolean> {
+  const wanted = target.trim()
+  if (!wanted || busy.value)
     return false
   busy.value = true
   error.value = null
   preview.value = null
   previewNotApplicable.value = null
-  // Opening a different map invalidates the previous map's terrain. Leaving it would
-  // show one map's terrain under another map's name.
-  terrain.value = null
+  // Opening a different map invalidates everything read from the previous map.
+  // Leaving it would show one map's terrain under another map's name.
+  forgetViews()
   try {
-    summary.value = await invoke<MapSummary>('open_map', { path: target })
+    summary.value = await invoke<MapSummary>('open_map', { path: wanted })
     return true
   }
   catch (e) {
@@ -91,6 +141,59 @@ export async function openPath(): Promise<boolean> {
   finally {
     busy.value = false
   }
+}
+
+/**
+ * Asks the system for a map, opens it, and returns the path it opened.
+ *
+ * # Why the filter does not decide anything
+ *
+ * The extensions below are what the *picker* offers, not a claim about the format: the
+ * core is what decides whether a file is a map, and it will say so if one of these is not.
+ * They are here because a dialog showing every replay and screenshot in a folder is a
+ * worse dialog, and because `.w3m` / `.w3x` / `.w3n` are the names the game itself uses.
+ *
+ * # Why this returns the path rather than navigating
+ *
+ * The composable has no router, and giving it one would make "where the window is" a
+ * concern of "what the core said" — the two facts this codebase keeps apart everywhere
+ * else. The caller that owns the shell does the push.
+ *
+ * @returns the opened path, or `null` when the dialog was cancelled or the map could not
+ * be read. A cancelled dialog is not a failure and leaves everything as it was.
+ */
+export async function openPickedMap(): Promise<string | null> {
+  if (busy.value)
+    return null
+  let chosen: string | null = null
+  try {
+    chosen = await openDialog({
+      multiple: false,
+      directory: false,
+      title: 'Open a Warcraft III map',
+      filters: [{ name: 'Warcraft III map', extensions: ['w3x', 'w3m', 'w3n'] }]
+    })
+  }
+  catch (e) {
+    // The dialog itself failing is a real fault — a missing plugin registration, a denied
+    // permission — and it must not look like the user cancelling.
+    error.value = `the file dialog could not be opened: ${String(e)}`
+    return null
+  }
+  // `null` is a cancelled dialog, which is not an error and not a reason to clear the map
+  // that may already be open.
+  if (chosen === null)
+    return null
+  return (await openPath(chosen)) ? chosen : null
+}
+
+/** Closes the open map and everything read from it. */
+export function closeMap(): void {
+  summary.value = null
+  error.value = null
+  preview.value = null
+  previewNotApplicable.value = null
+  forgetViews()
 }
 
 /**
@@ -115,6 +218,66 @@ export async function loadTerrain(): Promise<void> {
   }
   finally {
     terrainBusy.value = false
+  }
+}
+
+/**
+ * Loads the units on first use, for the same reason and with the same caching as
+ * [`loadTerrain`].
+ */
+export async function loadUnits(): Promise<void> {
+  if (!summary.value || units.value || unitsBusy.value)
+    return
+  unitsBusy.value = true
+  try {
+    units.value = await invoke<UnitView>('read_units', {
+      path: summary.value.path
+    })
+  }
+  catch (e) {
+    units.value = null
+    error.value = String(e)
+  }
+  finally {
+    unitsBusy.value = false
+  }
+}
+
+/** Loads the doodads on first use. */
+export async function loadDoodads(): Promise<void> {
+  if (!summary.value || doodads.value || doodadsBusy.value)
+    return
+  doodadsBusy.value = true
+  try {
+    doodads.value = await invoke<DoodadView>('read_doodads', {
+      path: summary.value.path
+    })
+  }
+  catch (e) {
+    doodads.value = null
+    error.value = String(e)
+  }
+  finally {
+    doodadsBusy.value = false
+  }
+}
+
+/** Loads the object data on first use. */
+export async function loadObjects(): Promise<void> {
+  if (!summary.value || objects.value || objectsBusy.value)
+    return
+  objectsBusy.value = true
+  try {
+    objects.value = await invoke<ObjectView>('read_objects', {
+      path: summary.value.path
+    })
+  }
+  catch (e) {
+    objects.value = null
+    error.value = String(e)
+  }
+  finally {
+    objectsBusy.value = false
   }
 }
 
